@@ -1,0 +1,37 @@
+# Backend Configuration
+app:
+  name: "APP Automated Testing Platform"
+  version: "1.0.0"
+  debug: true
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+
+database:
+  pool_size: 10
+  max_overflow: 20
+
+celery:
+  task_track_started: true
+  task_time_limit: 3600
+  worker_prefetch_multiplier: 1
+
+maestro:
+  binary_path: "/usr/local/bin/maestro"
+  timeout_ms: 30000
+  retry_count: 3
+
+vision:
+  similarity_threshold: 0.85
+  screenshot_dir: "/tmp/screenshots"
+
+self_healing:
+  enabled: true
+  max_retries: 3
+  strategies:
+    - element_not_found
+    - page_jump
+    - popup
+    - timeout
+    - input_fail

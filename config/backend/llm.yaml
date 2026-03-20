@@ -1,0 +1,94 @@
+# LLM Configuration
+# Supports multiple providers with primary/backup setup
+
+default_provider: minimax
+
+providers:
+  mock:
+    enabled: true
+    type: mock
+    models:
+      primary: mock-gpt-4
+      embedding: mock-embedding
+
+  minimax:
+    enabled: true
+    type: minimax
+    api_key: ${MINIMAX_API_KEY}
+    group_id: ${MINIMAX_GROUP_ID}
+    api_base: https://api.minimax.chat/v
+    models:
+      primary: MiniMax2.7
+      embedding: emb通用
+
+  openai:
+    enabled: false
+    type: openai
+    api_key: ${OPENAI_API_KEY}
+    api_base: https://api.openai.com/v1
+    models:
+      primary: gpt-4o
+      embedding: text-embedding-3-small
+
+  anthropic:
+    enabled: false
+    type: anthropic
+    api_key: ${ANTHROPIC_API_KEY}
+    models:
+      primary: claude-3-5-sonnet-20241022
+      vision: claude-3-5-sonnet-20241022
+
+# Intent classification prompt template
+intent_prompt_template: |
+  You are an intent classifier for mobile app testing.
+  Classify the following user instruction into one of these intents:
+  - app_open: Open an application
+  - login: Login to an app
+  - logout: Logout from an app
+  - swipe: Swipe on screen
+  - tap: Tap on element
+  - input: Input text
+  - assert: Verify element or state
+  - scroll: Scroll on screen
+  - capture: Take screenshot
+
+  Instruction: {{instruction}}
+
+  Respond with JSON:
+  {
+    "intent": "intent_name",
+    "entities": {
+      "app_name": "wechat",
+      "element": "login_button",
+      "text": "hello"
+    },
+    "confidence": 0.95
+  }
+
+# Script generation prompt template
+script_prompt_template: |
+  Generate a test script for mobile app testing.
+
+  Intent: {{intent}}
+  Entities: {{entities}}
+
+  Generate pseudo code that includes:
+  1. Clear step-by-step actions
+  2. Wait conditions
+  3. Assertion points
+
+  Respond with JSON:
+  {
+    "steps": [
+      {
+        "action": "launch_app",
+        "target": "com.tencent.mm",
+        "value": null
+      },
+      {
+        "action": "wait_for",
+        "target": "login_button",
+        "value": 5000
+      }
+    ]
+  }
