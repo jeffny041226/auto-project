@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(git init:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(source venv/bin/activate && python3 -c \"from app.main import app\" 2>&1 | tail -20)",
+      "Bash(source venv/bin/activate && timeout 10 uvicorn app.main:app --host 0.0.0.0 --port 8000 2>&1 || true)"
     ]
   }
 }

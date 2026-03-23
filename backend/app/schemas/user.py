@@ -44,3 +44,11 @@ class UserResponse(UserBase):
 
     class Config:
         from_attributes = True
+
+
+class TokenResponse(BaseModel):
+    """Schema for token response."""
+
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"

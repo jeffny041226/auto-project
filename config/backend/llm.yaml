@@ -38,6 +38,14 @@ providers:
       primary: claude-3-5-sonnet-20241022
       vision: claude-3-5-sonnet-20241022
 
+  autoglm:
+    enabled: true
+    type: autoglm
+    api_key: ${AUTOGLM_API_KEY}
+    api_base: ${AUTOGLM_API_BASE:-https://api.minimax.chat/v}
+    model: auto-glm-vision
+    timeout: 30
+
 # Intent classification prompt template
 intent_prompt_template: |
   You are an intent classifier for mobile app testing.

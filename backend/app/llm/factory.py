@@ -6,6 +6,7 @@ from app.llm.providers.mock import MockProvider
 from app.llm.providers.openai import OpenAIProvider
 from app.llm.providers.anthropic import AnthropicProvider
 from app.llm.providers.minimax import MiniMaxProvider
+from app.llm.providers.autoglm import AutoGLMProvider
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -19,6 +20,7 @@ class LLMFactory:
         "openai": OpenAIProvider,
         "anthropic": AnthropicProvider,
         "minimax": MiniMaxProvider,
+        "autoglm": AutoGLMProvider,
     }
 
     _instances: dict[str, BaseLLMProvider] = {}
