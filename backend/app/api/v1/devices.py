@@ -139,3 +139,23 @@ async def device_heartbeat(device_id: str, db: AsyncSession = Depends(get_db)):
     service = DeviceService(db)
     await service.update_heartbeat(device_id)
     return {"status": "ok"}
+
+
+@router.post("/{device_id}/commands")
+async def send_command_to_device(device_id: str, command: dict):
+    """Send a command to a connected device agent via WebSocket.
+
+    Args:
+        device_id: Device ID
+        command: Command to send, e.g. {"action": "run_task", "params": {"task": "...", "task_id": "..."}}
+    """
+    from app.core.device.agent import device_agent_manager
+
+    success = await device_agent_manager.send_command(device_id, command)
+    if success:
+        return {"status": "sent", "device_id": device_id}
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Device {device_id} not connected or command failed",
+        )

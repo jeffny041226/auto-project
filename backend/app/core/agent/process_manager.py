@@ -154,12 +154,11 @@ class AgentProcessManager:
         task_id = agent_process.task_id
 
         try:
-            # Determine the Open-AutoGLM main script path
-            autoglm_main = Path(config.autoglm_path) / "main.py"
+            # Determine the Open-AutoGLM main script path - use absolute path
+            backend_root = Path(__file__).parent.parent.parent.parent  # /app
+            autoglm_main = backend_root / "Open-AutoGLM" / "main.py"
             if not autoglm_main.exists():
-                autoglm_main = Path(__file__).parent.parent.parent.parent / "Open-AutoGLM" / "main.py"
-                if not autoglm_main.exists():
-                    raise FileNotFoundError(f"Open-AutoGLM main.py not found at {autoglm_main}")
+                raise FileNotFoundError(f"Open-AutoGLM main.py not found at {autoglm_main}")
 
             # Build command: python main.py -d <serial> "<instruction>"
             # The Open-AutoGLM will output JSON progress to stdout
@@ -179,13 +178,7 @@ class AgentProcessManager:
             # Build environment with model API settings
             import os
             env = os.environ.copy()
-            # Model API configuration via environment
-            if config.get("_api_base"):
-                env["PHONE_AGENT_BASE_URL"] = config["_api_base"]
-            if config.get("_api_key"):
-                env["PHONE_AGENT_API_KEY"] = config["_api_key"]
-            if config.get("_model"):
-                env["PHONE_AGENT_MODEL"] = config["_model"]
+            # API config is passed via environment variables from host
 
             if config.app_id:
                 cmd.extend(["--app-id", config.app_id])
