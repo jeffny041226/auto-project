@@ -1,7 +1,7 @@
 # LLM Configuration
 # Supports multiple providers with primary/backup setup
 
-default_provider: minimax
+default_provider: qwen
 
 providers:
   mock:
@@ -16,7 +16,7 @@ providers:
     type: minimax
     api_key: ${MINIMAX_API_KEY}
     group_id: ${MINIMAX_GROUP_ID}
-    api_base: https://api.minimax.chat/v
+    api_base: https://api.minimax.chat/v1
     models:
       primary: MiniMax2.7
       embedding: emb通用
@@ -30,6 +30,15 @@ providers:
       primary: gpt-4o
       embedding: text-embedding-3-small
 
+  qwen:
+    enabled: true
+    type: qwen
+    api_key: ${QWEN_API_KEY}
+    api_base: ${QWEN_API_BASE}
+    models:
+      primary: qwen-plus
+      embedding: text-embedding-v3
+
   anthropic:
     enabled: false
     type: anthropic
@@ -41,10 +50,17 @@ providers:
   autoglm:
     enabled: true
     type: autoglm
-    api_key: ${AUTOGLM_API_KEY}
-    api_base: ${AUTOGLM_API_BASE:-https://api.minimax.chat/v}
-    model: auto-glm-vision
-    timeout: 30
+    api_key: ms-ba78c487-f9e8-4ad6-a2ab-5240d341ab43
+    api_base: https://api-inference.modelscope.cn/v1
+    model: ZhipuAI/AutoGLM-Phone-9B
+    timeout: 120
+
+  autoglm_local:
+    enabled: true
+    type: autoglm_local
+    autoglm_path: ../Open-AutoGLM
+    maestro_path: maestro
+    default_device_serial: auto
 
 # Intent classification prompt template
 intent_prompt_template: |
@@ -75,28 +91,32 @@ intent_prompt_template: |
 
 # Script generation prompt template
 script_prompt_template: |
-  Generate a test script for mobile app testing.
+  Generate a test script for mobile app testing using Maestro framework.
 
   Intent: {{intent}}
   Entities: {{entities}}
 
-  Generate pseudo code that includes:
-  1. Clear step-by-step actions
-  2. Wait conditions
-  3. Assertion points
+  IMPORTANT: Use ONLY these valid Maestro actions:
+  - launchApp: Launch app (target = app package ID, value = null)
+  - tapOn: Tap on element (target = "id:xxx" or "text:xxx", value = null)
+  - inputText: Input text (target = null, value = "text to input")
+  - swipe: Swipe screen (value = {startX: 0-1, startY: 0-1, endX: 0-1, endY: 0-1, duration: ms})
+  - scroll: Scroll (value = null)
+  - waitForAnimationToEnd: Wait for animations to complete (no value needed)
+  - takeScreenshot: Take screenshot (value = null)
+  - pressKey: Press key (value = key like "BACK", "HOME", "ENTER")
+  - stopApp: Stop app (target = app ID, value = null)
 
-  Respond with JSON:
-  {
-    "steps": [
-      {
-        "action": "launch_app",
-        "target": "com.tencent.mm",
-        "value": null
-      },
-      {
-        "action": "wait_for",
-        "target": "login_button",
-        "value": 5000
-      }
-    ]
-  }
+  IMPORTANT RULES:
+  - target for tapOn MUST be "id:com.tencent.mm:id/xxx" or "text:ButtonText"
+  - appId format: "com.tencent.mm" (not com.example.app)
+  - Use waitForAnimationToEnd instead of waitForTime
+  - pressKey uses "key" field with string like "BACK" not numeric keycode
+  - Do NOT use: waitForElementToAppear, assert_app_state, assert_element_exists, waitForTime
+
+  Respond with JSON only:
+  {"steps": [
+    {"action": "launchApp", "target": "com.tencent.mm", "value": null},
+    {"action": "waitForAnimationToEnd", "target": null, "value": null},
+    {"action": "tapOn", "target": "text:我知道了", "value": null}
+  ]}

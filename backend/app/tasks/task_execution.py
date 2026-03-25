@@ -6,10 +6,117 @@ from typing import Any
 from app.tasks.celery_app import celery_app
 from app.core.executor.scheduler import TaskScheduler
 from app.core.script.manager import ScriptManager
+from app.core.script.matcher import ScriptMatcher
+from app.core.intention.parser import InstructionParser
+from app.core.intention.intent_classifier import IntentClassifier
+from app.core.script.generator import ScriptGenerator
+from app.core.script.template import MaestroTemplate
+from app.core.agent.executor import AgentExecutor
 from app.db.database import get_db_context
+from app.config import settings
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+@celery_app.task(bind=True, name="app.tasks.task_execution.process_task")
+def process_task(
+    self,
+    task_id: str,
+    user_id: int,
+    instruction: str,
+    device_id: str = None,
+) -> dict[str, Any]:
+    """Process a task: generate script and execute.
+
+    Args:
+        task_id: Task ID
+        user_id: User ID
+        instruction: Task instruction
+        device_id: Optional device ID
+
+    Returns:
+        Processing result
+    """
+    logger.info(f"Processing task: {task_id}")
+
+    async def _process():
+        # Connect to Redis for device pool
+        from app.db.redis import redis_client
+        await redis_client.connect()
+
+        async with get_db_context() as db:
+            from app.services.task import TaskService
+
+            # Try to find matching script
+            matcher = ScriptMatcher(db)
+            script = await matcher.find_similar(instruction, user_id)
+
+            if not script:
+                # Generate new script
+                parser = InstructionParser()
+                parsed = parser.parse(instruction)
+
+                classifier = IntentClassifier()
+                intent_result = await classifier.classify(parsed.cleaned)
+                intent = intent_result.get("intent", "tap")
+                entities = intent_result.get("entities", {})
+
+                generator = ScriptGenerator()
+                template = MaestroTemplate()
+
+                generated = await generator.generate(intent, entities, instruction)
+                steps = generated.get("steps", [])
+
+                maestro_yaml = template.render(
+                    steps=steps,
+                    app_id=entities.get("package", "com.example.app"),
+                    flow_name=f"Test: {intent}",
+                )
+
+                # Save script
+                manager = ScriptManager(db)
+                script = await manager.save_generated(
+                    user_id=user_id,
+                    intent=intent,
+                    structured_instruction={"intent": intent, "entities": entities},
+                    pseudo_code=str(generated),
+                    maestro_yaml=maestro_yaml,
+                )
+
+                await matcher.store_embedding(script, instruction)
+                logger.info(f"Generated new script: {script.script_id}")
+            else:
+                logger.info(f"Matched existing script: {script.script_id}")
+
+            # Update task with script_id and set to running
+            task_service = TaskService(db)
+            await task_service.update_task_by_id(task_id, {"script_id": script.script_id, "status": "running"})
+
+            # Execute via scheduler
+            scheduler = TaskScheduler(db)
+            result = await scheduler.execute_task(
+                task_id=task_id,
+                script_content=script.maestro_yaml,
+                device_id=device_id,
+            )
+
+            return {
+                "success": result.get("success", False),
+                "task_id": task_id,
+                "script_id": script.script_id,
+                "error": result.get("error"),
+            }
+
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    result = loop.run_until_complete(_process())
+    logger.info(f"Task processing completed: {task_id}, success: {result.get('success')}")
+    return result
 
 
 @celery_app.task(bind=True, name="app.tasks.task_execution.execute_task")
@@ -153,3 +260,134 @@ def update_progress(
         asyncio.set_event_loop(loop)
 
     return loop.run_until_complete(_update())
+
+
+@celery_app.task(bind=True, name="app.tasks.task_execution.process_task_agent")
+def process_task_agent(
+    self,
+    task_id: str,
+    user_id: int,
+    instruction: str,
+    device_id: str = None,
+) -> dict[str, Any]:
+    """Process a task using AI-driven agent executor (probe-style execution).
+
+    This task uses the AgentExecutor which:
+    1. Captures screenshot
+    2. Analyzes via AutoGLM vision
+    3. Decides next action via LLM
+    4. Executes the action
+    5. Loops until task completion
+    6. Generates final Maestro YAML script
+
+    Args:
+        task_id: Task ID
+        user_id: User ID
+        instruction: Task instruction (e.g., "打开微信")
+        device_id: Optional device ID
+
+    Returns:
+        Processing result with generated script
+    """
+    logger.info(f"Processing task with agent executor: {task_id}")
+
+    async def _process():
+        # Connect to Redis for device pool
+        from app.db.redis import redis_client
+        await redis_client.connect()
+
+        # Load LLM configs
+        llm_config = settings.llm_config
+        qwen_config = llm_config.get("providers", {}).get("qwen", {})
+        autoglm_config = llm_config.get("providers", {}).get("autoglm", {})
+
+        # Use provided device_id or get from pool
+        device_serial = device_id
+        acquired_device = False
+
+        if not device_serial:
+            async with get_db_context() as db:
+                from app.core.executor.device_pool import DevicePool
+                pool = DevicePool(db)
+                device = await pool.allocate_device(task_id)
+                if not device:
+                    return {"success": False, "error": "No device available"}
+                device_serial = device.device_id
+                acquired_device = True
+
+        async with get_db_context() as db:
+            from app.services.task import TaskService
+
+            # Update task status to running
+            task_service = TaskService(db)
+            await task_service.update_task_by_id(task_id, {"status": "running"})
+
+            try:
+                # Create and run agent executor
+                executor = AgentExecutor(
+                    device_serial=device_serial,
+                    llm_config=qwen_config,
+                    autoglm_config=autoglm_config,
+                )
+
+                result = await executor.execute(
+                    instruction=instruction,
+                    task_id=task_id,
+                )
+
+                await executor.close()
+
+                # Save generated script if successful
+                if result.get("success") and result.get("generated_script"):
+                    manager = ScriptManager(db)
+
+                    # Parse instruction for intent
+                    parser = InstructionParser()
+                    parsed = parser.parse(instruction)
+                    intent = parsed.app_name or "agent_generated"
+
+                    script = await manager.save_generated(
+                        user_id=user_id,
+                        intent=intent,
+                        structured_instruction={
+                            "type": "agent_generated",
+                            "instruction": instruction,
+                            "iterations": result.get("iterations", 0),
+                        },
+                        pseudo_code=str(result.get("steps", [])),
+                        maestro_yaml=result.get("generated_script", ""),
+                    )
+
+                    result["script_id"] = script.script_id
+
+                    # Update task with script_id
+                    await task_service.update_task_by_id(
+                        task_id,
+                        {"script_id": script.script_id}
+                    )
+
+                # Release device if we acquired one
+                if acquired_device:
+                    pool = DevicePool(db)
+                    await pool.release_device(device_serial)
+
+                return result
+
+            except Exception as e:
+                logger.error(f"Agent execution error: {e}")
+                # Release device on error
+                if acquired_device:
+                    pool = DevicePool(db)
+                    await pool.release_device(device_serial)
+
+                return {"success": False, "error": str(e)}
+
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    result = loop.run_until_complete(_process())
+    logger.info(f"Agent task processing completed: {task_id}, success: {result.get('success')}")
+    return result

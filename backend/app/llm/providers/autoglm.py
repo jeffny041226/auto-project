@@ -2,6 +2,7 @@
 import os
 import json
 import base64
+from dataclasses import dataclass
 from typing import Any, Optional
 
 import httpx
@@ -77,17 +78,17 @@ class AutoGLMProvider(BaseLLMProvider):
         self.api_key = config.get("api_key") or os.getenv("AUTOGLM_API_KEY")
         self.api_base = config.get(
             "api_base",
-            "https://api.minimax.chat/v"
+            "https://api.minimax.chat/v1"
         ).rstrip("/")
         self.model = config.get("model", "auto-glm-vision")
         self.timeout = config.get("timeout", 30)
 
-        # HTTP client for API calls
+        # HTTP client for API calls with redirect handling
         self._client: Optional[httpx.AsyncClient] = None
 
     @property
     def client(self) -> httpx.AsyncClient:
-        """Get or create HTTP client."""
+        """Get or create HTTP client with redirect support."""
         if self._client is None:
             self._client = httpx.AsyncClient(
                 timeout=httpx.Timeout(self.timeout),
@@ -95,6 +96,7 @@ class AutoGLMProvider(BaseLLMProvider):
                     "Authorization": f"Bearer {self.api_key}",
                     "Content-Type": "application/json",
                 },
+                follow_redirects=True,  # Handle 308 redirects automatically
             )
         return self._client
 
@@ -409,7 +411,3 @@ Provide detailed information about each element found."""
             finish_reason="stop",
             raw_response=result,
         )
-
-
-# Required for dataclass usage
-from dataclasses import dataclass

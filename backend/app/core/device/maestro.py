@@ -119,7 +119,7 @@ class MaestroDeviceConnector:
                     "parsed": parsed,
                 }
 
-            except asyncio.TimeoutExpired:
+            except TimeoutError:
                 result.kill()
                 return {
                     "success": False,

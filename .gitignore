@@ -54,6 +54,9 @@ temp/
 *.key
 credentials.json
 
+# Claude
+.claude/settings.local.json
+
 # Docker
 .dockerignore
 

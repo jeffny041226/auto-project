@@ -22,11 +22,14 @@ class TaskService:
 
     async def create_task(self, task_data: TaskCreate, user_id: int) -> TaskResponse:
         """Create a new task."""
+        # Convert empty string to None for foreign key fields
+        device_id = task_data.device_id if task_data.device_id else None
+
         task = Task(
             task_id=str(uuid.uuid4()),
             user_id=user_id,
             instruction=task_data.instruction,
-            device_id=task_data.device_id,
+            device_id=device_id,
             status="pending",
             total_steps=0,
             completed_steps=0,
@@ -37,6 +40,16 @@ class TaskService:
         await self.db.refresh(task)
 
         logger.info(f"Task created: {task.task_id}")
+
+        # Trigger Celery task to process the task (non-blocking)
+        from app.tasks.celery_app import celery_app
+        celery_app.send_task(
+            "app.tasks.task_execution.process_task",
+            args=[task.task_id, user_id, task_data.instruction],
+            kwargs={"device_id": device_id},
+        )
+        logger.info(f"Triggered process_task for task: {task.task_id}")
+
         return TaskResponse.model_validate(task)
 
     async def get_task(self, task_id: str) -> Optional[TaskResponse]:
@@ -73,11 +86,9 @@ class TaskService:
     ) -> tuple[list[TaskResponse], int]:
         """List tasks with pagination."""
         query = select(Task)
-        count_query = select(Task)
 
         if user_id:
             query = query.where(Task.user_id == user_id)
-            count_query = count_query.where(Task.user_id == user_id)
 
         from sqlalchemy import func
 
@@ -108,6 +119,24 @@ class TaskService:
         await self.db.refresh(task)
 
         logger.info(f"Task updated: {task_id}")
+        return TaskResponse.model_validate(task)
+
+    async def update_task_by_id(self, task_id: str, updates: dict) -> Optional[TaskResponse]:
+        """Update task by task_id with a dictionary of updates."""
+        result = await self.db.execute(select(Task).where(Task.task_id == task_id))
+        task = result.scalar_one_or_none()
+
+        if not task:
+            return None
+
+        for field, value in updates.items():
+            if hasattr(task, field):
+                setattr(task, field, value)
+
+        await self.db.flush()
+        await self.db.refresh(task)
+
+        logger.info(f"Task {task_id} updated with: {updates}")
         return TaskResponse.model_validate(task)
 
     async def add_task_step(self, step_data: dict) -> TaskStep:
@@ -167,3 +196,24 @@ class TaskService:
             await self.db.flush()
 
             logger.info(f"Task {task_id} completed with status: {status}")
+
+    async def delete_task(self, task_id: str) -> bool:
+        """Delete a task and its steps."""
+        result = await self.db.execute(select(Task).where(Task.task_id == task_id))
+        task = result.scalar_one_or_none()
+
+        if not task:
+            return False
+
+        # Delete related steps first
+        steps_result = await self.db.execute(select(TaskStep).where(TaskStep.task_id == task_id))
+        steps = steps_result.scalars().all()
+        for step in steps:
+            await self.db.delete(step)
+
+        # Delete the task
+        await self.db.delete(task)
+        await self.db.flush()
+
+        logger.info(f"Task deleted: {task_id}")
+        return True

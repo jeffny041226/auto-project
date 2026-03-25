@@ -1,7 +1,7 @@
 """Script model."""
 from datetime import datetime
 
-from sqlalchemy import String, DateTime, BigInteger, Integer, Text, LargeBinary, JSON
+from sqlalchemy import String, DateTime, BigInteger, Integer, Text, LargeBinary, JSON, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
@@ -14,7 +14,7 @@ class Script(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     script_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), nullable=False)
     intent: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     structured_instruction: Mapped[dict] = mapped_column(JSON, nullable=True)
     instruction_embedding: Mapped[bytes] = mapped_column(LargeBinary, nullable=True)

@@ -67,45 +67,90 @@ export const authApi = {
 // Scripts API
 export const scriptsApi = {
   list: (skip = 0, limit = 20) =>
-    api.get('/scripts', { params: { skip, limit } }),
+    api.get('/scripts/', { params: { skip, limit } }),
   get: (scriptId: string) =>
-    api.get(`/scripts/${scriptId}`),
+    api.get(`/scripts/${scriptId}/`),
   create: (data: any) =>
-    api.post('/scripts', data),
+    api.post('/scripts/', data),
   update: (scriptId: string, data: any) =>
-    api.put(`/scripts/${scriptId}`, data),
+    api.put(`/scripts/${scriptId}/`, data),
   delete: (scriptId: string) =>
-    api.delete(`/scripts/${scriptId}`),
+    api.delete(`/scripts/${scriptId}/`),
 }
 
 // Tasks API
 export const tasksApi = {
   list: (skip = 0, limit = 20) =>
-    api.get('/tasks', { params: { skip, limit } }),
+    api.get('/tasks/', { params: { skip, limit } }),
   get: (taskId: string) =>
-    api.get(`/tasks/${taskId}`),
+    api.get(`/tasks/${taskId}/`),
   create: (data: any) =>
-    api.post('/tasks', data),
+    api.post('/tasks/', data),
   update: (taskId: string, data: any) =>
-    api.patch(`/tasks/${taskId}`, data),
+    api.patch(`/tasks/${taskId}/`, data),
+  delete: (taskId: string) =>
+    api.delete(`/tasks/${taskId}/`),
 }
 
 // Devices API
 export const devicesApi = {
   list: (skip = 0, limit = 20) =>
-    api.get('/devices', { params: { skip, limit } }),
+    api.get('/devices/', { params: { skip, limit } }),
   get: (deviceId: string) =>
-    api.get(`/devices/${deviceId}`),
+    api.get(`/devices/${deviceId}/`),
   create: (data: any) =>
-    api.post('/devices', data),
+    api.post('/devices/', data),
   update: (deviceId: string, data: any) =>
-    api.patch(`/devices/${deviceId}`, data),
+    api.patch(`/devices/${deviceId}/`, data),
 }
 
 // Reports API
 export const reportsApi = {
   get: (reportId: string) =>
-    api.get(`/reports/${reportId}`),
+    api.get(`/reports/${reportId}/`),
   download: (reportId: string) =>
-    api.get(`/reports/${reportId}/download`, { responseType: 'blob' }),
+    api.get(`/reports/${reportId}/download/`, { responseType: 'blob' }),
+}
+
+// Agent API
+export const agentApi = {
+  // Create new agent task
+  createTask: (data: {
+    instruction: string
+    device_serial: string
+    app_id?: string
+    max_steps?: number
+    timeout?: number
+    lang?: string
+  }) => api.post('/agent/tasks', data),
+
+  // Get task status
+  getTaskStatus: (taskId: string) =>
+    api.get(`/agent/tasks/${taskId}/status`),
+
+  // Get generated script
+  getScript: (taskId: string) =>
+    api.get(`/agent/tasks/${taskId}/script`),
+
+  // Stop running task
+  stopTask: (taskId: string) =>
+    api.post(`/agent/tasks/${taskId}/stop`),
+
+  // Send additional instruction to running task
+  sendInstruction: (taskId: string, instruction: string) =>
+    api.post(`/agent/tasks/${taskId}/send-instruction`, {
+      instruction,
+    }),
+
+  // List all agent tasks
+  listTasks: () =>
+    api.get('/agent/tasks'),
+
+  // Reuse script with new instruction
+  reuseScript: (scriptId: string, newInstruction: string, deviceSerial?: string) =>
+    api.post(`/agent/scripts/${scriptId}/reuse`, {
+      script_id: scriptId,
+      new_instruction: newInstruction,
+      device_serial: deviceSerial,
+    }),
 }

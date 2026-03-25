@@ -1,7 +1,7 @@
 """Instruction parser for preprocessing."""
 import re
 from typing import Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from app.utils.logger import get_logger
 
@@ -15,8 +15,8 @@ class ParsedInstruction:
     original: str
     cleaned: str
     app_name: Optional[str] = None
-    credentials: dict[str, str] = {}
-    sensitive_data: list[str] = []
+    credentials: dict[str, str] = field(default_factory=dict)
+    sensitive_data: list[str] = field(default_factory=list)
 
 
 class InstructionParser:
@@ -35,6 +35,7 @@ class InstructionParser:
         "twitter": [r"twitter", r"x\.com", r"推特"],
         "facebook": [r"facebook", r"fb", r"脸书"],
         "sina": [r"新浪", r"weibo", r"微博"],
+        "shanhai": [r"山海", r"shanhai"],
     }
 
     # Patterns for credentials

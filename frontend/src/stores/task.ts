@@ -95,5 +95,14 @@ export const useTaskStore = defineStore('task', {
         this.currentTask = { ...this.currentTask, ...updates }
       }
     },
+
+    async deleteTask(taskId: string) {
+      await tasksApi.delete(taskId)
+      this.tasks = this.tasks.filter((t) => t.task_id !== taskId)
+      if (this.currentTask?.task_id === taskId) {
+        this.currentTask = null
+      }
+      this.total--
+    },
   },
 })

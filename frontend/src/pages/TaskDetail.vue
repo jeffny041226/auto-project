@@ -3,67 +3,67 @@
     <el-card v-if="task">
       <template #header>
         <div class="card-header">
-          <span>Task: {{ task.task_id }}</span>
-          <el-button @click="$router.push('/tasks')">Back</el-button>
+          <span>{{ t('task.detail') }}: {{ task.task_id }}</span>
+          <el-button @click="$router.push('/tasks')">{{ t('common.back') }}</el-button>
         </div>
       </template>
 
       <el-descriptions :column="2" border>
-        <el-descriptions-item label="Task ID">{{ task.task_id }}</el-descriptions-item>
-        <el-descriptions-item label="Status">
-          <el-tag :type="getStatusType(task.status)">{{ task.status }}</el-tag>
+        <el-descriptions-item :label="t('task.taskId')">{{ task.task_id }}</el-descriptions-item>
+        <el-descriptions-item :label="t('task.status')">
+          <el-tag :type="getStatusType(task.status)">{{ t(`status.${task.status}`) }}</el-tag>
         </el-descriptions-item>
-        <el-descriptions-item label="Instruction">{{ task.instruction }}</el-descriptions-item>
-        <el-descriptions-item label="Device">{{ task.device_id }}</el-descriptions-item>
-        <el-descriptions-item label="Progress">
+        <el-descriptions-item :label="t('task.instruction')">{{ task.instruction }}</el-descriptions-item>
+        <el-descriptions-item :label="t('task.device')">{{ task.device_id }}</el-descriptions-item>
+        <el-descriptions-item :label="t('task.progress')">
           <el-progress
             :percentage="getProgress(task)"
             :status="getProgressStatus(task.status)"
           />
         </el-descriptions-item>
-        <el-descriptions-item label="Duration">
+        <el-descriptions-item :label="t('task.duration')">
           {{ task.duration_ms ? `${(task.duration_ms / 1000).toFixed(1)}s` : '-' }}
         </el-descriptions-item>
-        <el-descriptions-item label="Error Type" v-if="task.error_type">
+        <el-descriptions-item :label="t('task.errorType')" v-if="task.error_type">
           {{ task.error_type }}
         </el-descriptions-item>
-        <el-descriptions-item label="Error Message" v-if="task.error_message">
+        <el-descriptions-item :label="t('task.errorMessage')" v-if="task.error_message">
           {{ task.error_message }}
         </el-descriptions-item>
-        <el-descriptions-item label="Created At">
+        <el-descriptions-item :label="t('task.createdAt')">
           {{ formatDate(task.created_at) }}
         </el-descriptions-item>
-        <el-descriptions-item label="Report" v-if="task.report_url">
-          <el-button type="primary" size="small" @click="viewReport">View Report</el-button>
+        <el-descriptions-item :label="t('task.report')" v-if="task.report_url">
+          <el-button type="primary" size="small" @click="viewReport">{{ t('task.viewReport') }}</el-button>
         </el-descriptions-item>
       </el-descriptions>
     </el-card>
 
     <el-card v-if="task?.steps?.length" style="margin-top: 20px">
       <template #header>
-        <span>Task Steps</span>
+        <span>{{ t('task.steps') }}</span>
       </template>
       <el-table :data="task.steps" style="width: 100%">
-        <el-table-column prop="step_index" label="#" width="60" />
-        <el-table-column prop="action" label="Action" width="120" />
-        <el-table-column prop="target" label="Target" />
-        <el-table-column prop="value" label="Value" />
-        <el-table-column prop="status" label="Status" width="100">
+        <el-table-column prop="step_index" :label="t('task.stepIndex')" width="60" />
+        <el-table-column prop="action" :label="t('task.action')" width="120" />
+        <el-table-column prop="target" :label="t('task.target')" />
+        <el-table-column prop="value" :label="t('task.value')" />
+        <el-table-column prop="status" :label="t('task.stepStatus')" width="100">
           <template #default="{ row }">
-            <el-tag :type="getStatusType(row.status)">{{ row.status }}</el-tag>
+            <el-tag :type="getStatusType(row.status)">{{ t(`status.${row.status}`) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="retry_count" label="Retries" width="80" />
-        <el-table-column prop="duration_ms" label="Duration" width="100">
+        <el-table-column prop="retry_count" :label="t('task.retries')" width="80" />
+        <el-table-column prop="duration_ms" :label="t('task.duration')" width="100">
           <template #default="{ row }">
             {{ row.duration_ms ? `${(row.duration_ms / 1000).toFixed(1)}s` : '-' }}
           </template>
         </el-table-column>
-        <el-table-column label="Screenshots" width="150">
+        <el-table-column :label="t('task.screenshot')" width="150">
           <template #default="{ row }">
             <span v-if="row.screenshot_before || row.screenshot_after">
-              <el-button size="small" link @click="viewScreenshot(row.screenshot_before)">Before</el-button>
-              <el-button size="small" link @click="viewScreenshot(row.screenshot_after)">After</el-button>
+              <el-button size="small" link @click="viewScreenshot(row.screenshot_before)">{{ t('task.before') }}</el-button>
+              <el-button size="small" link @click="viewScreenshot(row.screenshot_after)">{{ t('task.after') }}</el-button>
             </span>
             <span v-else>-</span>
           </template>
@@ -76,10 +76,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useTaskStore } from '@/stores/task'
 
+const { t } = useI18n()
 const route = useRoute()
 const taskStore = useTaskStore()
 

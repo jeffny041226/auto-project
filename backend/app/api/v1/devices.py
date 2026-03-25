@@ -27,16 +27,38 @@ async def list_devices(skip: int = 0, limit: int = 20, db: AsyncSession = Depend
 
 @router.get("/discover")
 async def discover_adb_devices():
-    """Discover available ADB devices.
+    """Discover and auto-register available ADB devices.
 
-    Returns list of Android devices connected via ADB.
+    Scans for connected Android devices via ADB and automatically
+    registers any new devices in the database.
+
+    Returns:
+        List of discovered ADB devices with their registration status.
     """
-    from app.core.device.maestro import MaestroDeviceConnector
+    from app.core.device.scanner import get_device_scanner
 
-    devices = await MaestroDeviceConnector.list_available_devices()
+    scanner = get_device_scanner()
+    if scanner:
+        # Trigger immediate scan
+        devices = await scanner.discover_now()
+        device_list = [
+            {
+                "serial": d.serial,
+                "status": d.status,
+                "model": d.model,
+                "product": d.product,
+            }
+            for d in devices
+        ]
+    else:
+        # Fallback to Maestro connector
+        from app.core.device.maestro import MaestroDeviceConnector
+        device_list = await MaestroDeviceConnector.list_available_devices()
+
     return {
-        "devices": devices,
-        "count": len(devices),
+        "devices": device_list,
+        "count": len(device_list),
+        "auto_registered": scanner is not None,
     }
 
 

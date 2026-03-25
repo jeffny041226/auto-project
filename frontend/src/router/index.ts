@@ -10,45 +10,50 @@ const routes: RouteRecordRaw[] = [
   },
   {
     path: '/',
-    name: 'Dashboard',
-    component: () => import('@/pages/Dashboard.vue'),
+    component: () => import('@/components/Layout.vue'),
     meta: { requiresAuth: true },
-  },
-  {
-    path: '/instruction',
-    name: 'InstructionInput',
-    component: () => import('@/pages/InstructionInput.vue'),
-    meta: { requiresAuth: true },
-  },
-  {
-    path: '/scripts',
-    name: 'ScriptManagement',
-    component: () => import('@/pages/ScriptManagement.vue'),
-    meta: { requiresAuth: true },
-  },
-  {
-    path: '/tasks',
-    name: 'TaskList',
-    component: () => import('@/pages/TaskList.vue'),
-    meta: { requiresAuth: true },
-  },
-  {
-    path: '/tasks/:id',
-    name: 'TaskDetail',
-    component: () => import('@/pages/TaskDetail.vue'),
-    meta: { requiresAuth: true },
-  },
-  {
-    path: '/devices',
-    name: 'DeviceManagement',
-    component: () => import('@/pages/DeviceManagement.vue'),
-    meta: { requiresAuth: true },
-  },
-  {
-    path: '/reports',
-    name: 'ReportView',
-    component: () => import('@/pages/ReportView.vue'),
-    meta: { requiresAuth: true },
+    children: [
+      {
+        path: '/',
+        name: 'Dashboard',
+        component: () => import('@/pages/Dashboard.vue'),
+      },
+      {
+        path: '/instruction',
+        name: 'InstructionInput',
+        component: () => import('@/pages/InstructionInput.vue'),
+      },
+      {
+        path: '/agent',
+        name: 'AgentConsole',
+        component: () => import('@/pages/AgentConsole.vue'),
+      },
+      {
+        path: '/scripts',
+        name: 'ScriptManagement',
+        component: () => import('@/pages/ScriptManagement.vue'),
+      },
+      {
+        path: '/tasks',
+        name: 'TaskList',
+        component: () => import('@/pages/TaskList.vue'),
+      },
+      {
+        path: '/tasks/:id',
+        name: 'TaskDetail',
+        component: () => import('@/pages/TaskDetail.vue'),
+      },
+      {
+        path: '/devices',
+        name: 'DeviceManagement',
+        component: () => import('@/pages/DeviceManagement.vue'),
+      },
+      {
+        path: '/reports',
+        name: 'ReportView',
+        component: () => import('@/pages/ReportView.vue'),
+      },
+    ],
   },
 ]
 
@@ -57,9 +62,9 @@ const router = createRouter({
   routes,
 })
 
-router.beforeEach((to, from, next) => {
+router.beforeEach((to, _from, next) => {
   const userStore = useUserStore()
-  const requiresAuth = to.meta.requiresAuth !== false
+  const requiresAuth = to.matched.some((record) => record.meta.requiresAuth !== false)
 
   if (requiresAuth && !userStore.token) {
     next({ name: 'Login' })

@@ -7,6 +7,7 @@ from app.llm.providers.openai import OpenAIProvider
 from app.llm.providers.anthropic import AnthropicProvider
 from app.llm.providers.minimax import MiniMaxProvider
 from app.llm.providers.autoglm import AutoGLMProvider
+from app.llm.providers.qwen import QwenProvider
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -21,6 +22,7 @@ class LLMFactory:
         "anthropic": AnthropicProvider,
         "minimax": MiniMaxProvider,
         "autoglm": AutoGLMProvider,
+        "qwen": QwenProvider,
     }
 
     _instances: dict[str, BaseLLMProvider] = {}

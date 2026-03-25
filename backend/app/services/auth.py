@@ -10,12 +10,12 @@ from sqlalchemy import select
 
 from app.config import settings
 from app.models.user import User
-from app.schemas.user import UserCreate, UserResponse, TokenResponse
+from app.schemas.user import UserCreate, UserLogin, UserResponse, TokenResponse
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 
 
 class AuthService:

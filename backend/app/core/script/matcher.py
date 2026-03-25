@@ -98,6 +98,11 @@ class ScriptMatcher:
 
     def _cosine_similarity(self, a: np.ndarray, b: np.ndarray) -> float:
         """Calculate cosine similarity between two vectors."""
+        # Check dimensions match
+        if a.shape != b.shape:
+            logger.warning(f"Embedding dimension mismatch: {a.shape} vs {b.shape}. Skipping similarity.")
+            return 0.0
+
         dot_product = np.dot(a, b)
         norm_a = np.linalg.norm(a)
         norm_b = np.linalg.norm(b)

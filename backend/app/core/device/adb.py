@@ -126,11 +126,10 @@ class ADBConnector:
                 "adb", "-s", serial, "shell", command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                timeout=timeout,
             )
             stdout, stderr = await asyncio.wait_for(
                 result.communicate(),
-                timeout=timeout + 5,
+                timeout=timeout,
             )
 
             if result.returncode != 0:
@@ -138,7 +137,7 @@ class ADBConnector:
 
             return stdout.decode()
 
-        except asyncio.TimeoutExpired:
+        except asyncio.TimeoutError:
             logger.error(f"Shell command timed out: {command}")
             raise
         except Exception as e:

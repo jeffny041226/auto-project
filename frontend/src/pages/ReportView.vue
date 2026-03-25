@@ -2,38 +2,38 @@
   <div class="report-view">
     <el-card>
       <template #header>
-        <span>Test Reports</span>
+        <span>{{ t('report.title') }}</span>
       </template>
       <el-table :data="reports" v-loading="loading" style="width: 100%">
-        <el-table-column prop="report_id" label="Report ID" width="150" />
-        <el-table-column prop="task_id" label="Task ID" width="150" />
-        <el-table-column prop="status" label="Status" width="100">
+        <el-table-column prop="report_id" :label="t('task.taskId')" width="150" />
+        <el-table-column prop="task_id" :label="t('task.taskId')" width="150" />
+        <el-table-column prop="status" :label="t('task.status')" width="100">
           <template #default="{ row }">
             <el-tag :type="row.status === 'passed' ? 'success' : 'danger'">
               {{ row.status }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="total_steps" label="Total Steps" width="100" />
-        <el-table-column prop="passed_steps" label="Passed" width="80" />
-        <el-table-column prop="failed_steps" label="Failed" width="80" />
-        <el-table-column prop="duration_ms" label="Duration" width="100">
+        <el-table-column prop="total_steps" :label="t('task.steps')" width="100" />
+        <el-table-column prop="passed_steps" :label="t('status.completed')" width="80" />
+        <el-table-column prop="failed_steps" :label="t('status.failed')" width="80" />
+        <el-table-column prop="duration_ms" :label="t('task.duration')" width="100">
           <template #default="{ row }">
             {{ row.duration_ms ? `${(row.duration_ms / 1000).toFixed(1)}s` : '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="Created At" width="180">
+        <el-table-column prop="created_at" :label="t('task.createdAt')" width="180">
           <template #default="{ row }">
             {{ formatDate(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="Actions" width="150">
+        <el-table-column :label="t('task.actions')" width="150">
           <template #default="{ row }">
             <el-button type="primary" size="small" link @click="viewReport(row.report_id)">
-              View
+              {{ t('task.view') }}
             </el-button>
             <el-button type="success" size="small" link @click="downloadReport(row.report_id)">
-              Download
+              {{ t('report.download') }}
             </el-button>
           </template>
         </el-table-column>
@@ -43,10 +43,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { reportsApi } from '@/api'
 
+const { t } = useI18n()
 const reports = ref<any[]>([])
 const loading = ref(false)
 
@@ -69,9 +71,9 @@ const downloadReport = async (reportId: string) => {
     link.click()
     link.remove()
     window.URL.revokeObjectURL(url)
-    ElMessage.success('Report downloaded successfully')
+    ElMessage.success(t('common.success'))
   } catch (error) {
-    ElMessage.error('Failed to download report')
+    ElMessage.error(t('common.error'))
   }
 }
 

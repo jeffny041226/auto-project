@@ -3,21 +3,21 @@
     <el-card>
       <template #header>
         <div class="card-header">
-          <span>Task List</span>
+          <span>{{ t('task.list') }}</span>
           <el-button type="primary" @click="$router.push('/instruction')">
-            New Task
+            {{ t('task.newTask') }}
           </el-button>
         </div>
       </template>
       <el-table :data="tasks" v-loading="loading" style="width: 100%">
-        <el-table-column prop="task_id" label="Task ID" width="150" />
-        <el-table-column prop="instruction" label="Instruction" />
-        <el-table-column prop="status" label="Status" width="100">
+        <el-table-column prop="task_id" :label="t('task.taskId')" width="150" />
+        <el-table-column prop="instruction" :label="t('task.instruction')" />
+        <el-table-column prop="status" :label="t('task.status')" width="100">
           <template #default="{ row }">
-            <el-tag :type="getStatusType(row.status)">{{ row.status }}</el-tag>
+            <el-tag :type="getStatusType(row.status)">{{ t(`status.${row.status}`) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="Progress" width="150">
+        <el-table-column :label="t('task.progress')" width="150">
           <template #default="{ row }">
             <el-progress
               :percentage="getProgress(row)"
@@ -25,21 +25,24 @@
             />
           </template>
         </el-table-column>
-        <el-table-column prop="device_id" label="Device" width="120" />
-        <el-table-column label="Duration" width="100">
+        <el-table-column prop="device_id" :label="t('task.device')" width="120" />
+        <el-table-column :label="t('task.duration')" width="100">
           <template #default="{ row }">
             {{ row.duration_ms ? `${(row.duration_ms / 1000).toFixed(1)}s` : '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="Created At" width="180">
+        <el-table-column prop="created_at" :label="t('task.createdAt')" width="180">
           <template #default="{ row }">
             {{ formatDate(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="Actions" width="100">
+        <el-table-column :label="t('task.actions')" width="120">
           <template #default="{ row }">
             <el-button type="primary" size="small" link @click="viewTask(row.task_id)">
-              View
+              {{ t('task.view') }}
+            </el-button>
+            <el-button type="danger" size="small" link @click="handleDelete(row.task_id)">
+              {{ t('task.delete') }}
             </el-button>
           </template>
         </el-table-column>
@@ -59,8 +62,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useTaskStore } from '@/stores/task'
 
+const { t } = useI18n()
 const router = useRouter()
 const taskStore = useTaskStore()
 
@@ -98,6 +104,22 @@ const formatDate = (dateStr: string) => {
 
 const viewTask = (taskId: string) => {
   router.push(`/tasks/${taskId}`)
+}
+
+const handleDelete = async (taskId: string) => {
+  try {
+    await ElMessageBox.confirm(t('task.deleteConfirm'), t('common.warning'), {
+      confirmButtonText: t('common.delete'),
+      cancelButtonText: t('common.cancel'),
+      type: 'warning',
+    })
+    await taskStore.deleteTask(taskId)
+    ElMessage.success(t('task.deleteSuccess'))
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      ElMessage.error(t('task.deleteFailed'))
+    }
+  }
 }
 
 const handlePageChange = (page: number) => {

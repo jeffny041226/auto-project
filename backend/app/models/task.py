@@ -14,7 +14,7 @@ class Task(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     task_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), nullable=False, index=True)
     instruction: Mapped[str] = mapped_column(Text, nullable=False)
     script_id: Mapped[str] = mapped_column(String(64), ForeignKey("scripts.script_id"), nullable=True)
     device_id: Mapped[str] = mapped_column(String(64), ForeignKey("devices.device_id"), nullable=True)

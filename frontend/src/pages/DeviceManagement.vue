@@ -3,21 +3,21 @@
     <el-card>
       <template #header>
         <div class="card-header">
-          <span>Device Management</span>
-          <el-button type="primary" @click="handleCreate">Add Device</el-button>
+          <span>{{ t('device.list') }}</span>
+          <el-button type="primary" @click="handleCreate">{{ t('common.edit') }}</el-button>
         </div>
       </template>
       <el-table :data="devices" v-loading="loading" style="width: 100%">
-        <el-table-column prop="device_id" label="Device ID" width="150" />
-        <el-table-column prop="device_name" label="Device Name" width="150" />
+        <el-table-column prop="device_id" :label="t('device.deviceId')" width="150" />
+        <el-table-column prop="device_name" :label="t('device.deviceName')" width="150" />
         <el-table-column prop="os_version" label="OS Version" width="100" />
         <el-table-column prop="model" label="Model" />
-        <el-table-column prop="status" label="Status" width="100">
+        <el-table-column prop="status" :label="t('device.status')" width="100">
           <template #default="{ row }">
-            <el-tag :type="getStatusType(row.status)">{{ row.status }}</el-tag>
+            <el-tag :type="getStatusType(row.status)">{{ t(`status.${row.status}`) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="current_task_id" label="Current Task" width="150">
+        <el-table-column prop="current_task_id" :label="t('task.taskId')" width="150">
           <template #default="{ row }">
             {{ row.current_task_id || '-' }}
           </template>
@@ -27,10 +27,10 @@
             {{ row.last_heartbeat ? formatDate(row.last_heartbeat) : '-' }}
           </template>
         </el-table-column>
-        <el-table-column label="Actions" width="150">
+        <el-table-column :label="t('device.actions')" width="150">
           <template #default="{ row }">
             <el-button type="primary" size="small" link @click="editDevice(row.device_id)">
-              Edit
+              {{ t('common.edit') }}
             </el-button>
           </template>
         </el-table-column>
@@ -39,10 +39,10 @@
 
     <el-dialog v-model="dialogVisible" :title="dialogTitle" width="50%">
       <el-form :model="form" label-width="120px">
-        <el-form-item label="Device ID">
+        <el-form-item :label="t('device.deviceId')">
           <el-input v-model="form.device_id" :disabled="isEditing" />
         </el-form-item>
-        <el-form-item label="Device Name">
+        <el-form-item :label="t('device.deviceName')">
           <el-input v-model="form.device_name" />
         </el-form-item>
         <el-form-item label="OS Version">
@@ -53,8 +53,8 @@
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="dialogVisible = false">Cancel</el-button>
-        <el-button type="primary" @click="handleSave">Save</el-button>
+        <el-button @click="dialogVisible = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" @click="handleSave">{{ t('common.save') }}</el-button>
       </template>
     </el-dialog>
   </div>
@@ -62,9 +62,11 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { useDeviceStore } from '@/stores/device'
 
+const { t } = useI18n()
 const deviceStore = useDeviceStore()
 
 const loading = computed(() => deviceStore.loading)
@@ -102,7 +104,7 @@ const handleCreate = () => {
     model: '',
   })
   isEditing.value = false
-  dialogTitle.value = 'Add Device'
+  dialogTitle.value = t('common.edit')
   dialogVisible.value = true
 }
 
@@ -111,7 +113,7 @@ const editDevice = async (deviceId: string) => {
   if (device) {
     Object.assign(form, device)
     isEditing.value = true
-    dialogTitle.value = 'Edit Device'
+    dialogTitle.value = t('common.edit')
     dialogVisible.value = true
   }
 }
@@ -120,15 +122,15 @@ const handleSave = async () => {
   try {
     if (isEditing.value) {
       await deviceStore.updateDevice(form.device_id, form)
-      ElMessage.success('Device updated successfully')
+      ElMessage.success(t('common.success'))
     } else {
       await deviceStore.createDevice(form)
-      ElMessage.success('Device added successfully')
+      ElMessage.success(t('common.success'))
     }
     dialogVisible.value = false
     deviceStore.fetchDevices()
   } catch (error) {
-    ElMessage.error('Failed to save device')
+    ElMessage.error(t('common.error'))
   }
 }
 

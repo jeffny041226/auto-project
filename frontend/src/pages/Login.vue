@@ -1,12 +1,12 @@
 <template>
   <div class="login-container">
     <div class="login-card">
-      <h1 class="title">APP Automated Testing Platform</h1>
+      <h1 class="title">{{ t('header.title') }}</h1>
       <el-form ref="formRef" :model="form" :rules="rules" class="login-form">
         <el-form-item prop="username">
           <el-input
             v-model="form.username"
-            placeholder="Username"
+            :placeholder="t('login.usernamePlaceholder')"
             size="large"
             :prefix-icon="User"
           />
@@ -15,7 +15,7 @@
           <el-input
             v-model="form.password"
             type="password"
-            placeholder="Password"
+            :placeholder="t('login.passwordPlaceholder')"
             size="large"
             :prefix-icon="Lock"
             show-password
@@ -30,14 +30,10 @@
             class="login-button"
             @click="handleLogin"
           >
-            Login
+            {{ t('login.loginButton') }}
           </el-button>
         </el-form-item>
       </el-form>
-      <div class="register-link">
-        <span>Don't have an account? </span>
-        <router-link to="/register">Register</router-link>
-      </div>
     </div>
   </div>
 </template>
@@ -45,10 +41,12 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { User, Lock } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 
+const { t } = useI18n()
 const router = useRouter()
 const userStore = useUserStore()
 
@@ -61,8 +59,8 @@ const form = reactive({
 })
 
 const rules = {
-  username: [{ required: true, message: 'Please enter username', trigger: 'blur' }],
-  password: [{ required: true, message: 'Please enter password', trigger: 'blur' }],
+  username: [{ required: true, message: 'login.usernamePlaceholder', trigger: 'blur' }],
+  password: [{ required: true, message: 'login.passwordPlaceholder', trigger: 'blur' }],
 }
 
 const handleLogin = async () => {
@@ -72,10 +70,10 @@ const handleLogin = async () => {
   loading.value = true
   try {
     await userStore.login(form.username, form.password)
-    ElMessage.success('Login successful')
+    ElMessage.success(t('login.loginSuccess'))
     router.push({ name: 'Dashboard' })
   } catch (error: any) {
-    ElMessage.error(error.response?.data?.detail || 'Login failed')
+    ElMessage.error(error.response?.data?.detail || t('login.loginFailed'))
   } finally {
     loading.value = false
   }

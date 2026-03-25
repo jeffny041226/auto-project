@@ -18,40 +18,40 @@ class MaestroTemplate:
 {% if step.action == 'launchApp' %}
 - launchApp:
     appId: {{ step.target }}
-{% elif step.action == 'tapOnElement' %}
+{% elif step.action == 'tapOn' %}
+{% if step.x is defined and step.y is defined %}
 - tapOn:
-    {{ step.target }}: {{ step.value or '' }}
-{% elif step.action == 'tapOnText' %}
-- tapOnText:
-    text: {{ step.target }}
+    point: {{ step.x }},{{ step.y }}
+{% else %}
+- tapOn:
+    {{ step.target }}
+{% endif %}
 {% elif step.action == 'inputText' %}
 - inputText:
-    {{ step.target }}: {{ step.value }}
+    text: {{ step.value }}
 {% elif step.action == 'swipe' %}
 - swipe:
     startX: {{ step.value.startX | default(0.5) }}
-    startY: {{ step.value.startY | default(0.8) }}
+    startY: {{ step.value.startY | default(0.5) }}
     endX: {{ step.value.endX | default(0.5) }}
     endY: {{ step.value.endY | default(0.2) }}
     duration: {{ step.value.duration | default(500) }}
-{% elif step.action == 'waitForElement' %}
-- waitForElementToAppear:
-    {{ step.target }}: {{ step.value }}
-    timeout: {{ step.value.timeout | default(5000) }}
-{% elif step.action == 'assertExists' %}
-- assertExists:
-    {{ step.target }}: {{ step.value }}
-{% elif step.action == 'assertText' %}
-- assertText:
-    {{ step.target }}: {{ step.value }}
-{% elif step.action == 'screenshot' %}
-- screenshot:
-    path: {{ step.value | default('screenshots/') }}{{ loop.index }}.png
+{% elif step.action == 'waitForTime' %}
+- waitForAnimationToEnd
+{% elif step.action == 'waitForAnimationToEnd' %}
+- waitForAnimationToEnd
+{% elif step.action == 'takeScreenshot' %}
+- takeScreenshot
 {% elif step.action == 'scroll' %}
 - scroll
 {% elif step.action == 'pressKey' %}
 - pressKey:
-    code: {{ step.value }}
+    key: {{ step.value }}
+{% elif step.action == 'stopApp' %}
+- stopApp:
+    appId: {{ step.target }}
+{% elif step.action == 'eraseText' %}
+- eraseText
 {% else %}
 # Unknown action: {{ step.action }}
 {% endif %}
@@ -120,7 +120,7 @@ class MaestroTemplate:
                 f"    duration: {value.get('duration', 500)}"
             )
         elif action == "waitForElement":
-            return f"- waitForElementToAppear:\n    timeout: {step.get('value', 5000)}"
+            return f"- waitForAnimationToEnd"
         elif action == "assertExists":
             return f"- assertExists"
         elif action == "screenshot":

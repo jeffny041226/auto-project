@@ -116,12 +116,43 @@ services:
     container_name: auto-test-frontend
     restart: unless-stopped
     environment:
-      VITE_API_BASE_URL: http://localhost:8000/api/v1
+      VITE_API_BASE_URL: /api/v1
     ports:
       - "3000:3000"
     volumes:
       - ../frontend:/app
       - /app/node_modules
+    networks:
+      - auto-test-network
+
+  celery-worker:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile.celery
+    container_name: auto-test-celery
+    restart: unless-stopped
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: autotest
+      DB_PASSWORD: autotest123
+      DB_NAME: auto_test
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+    volumes:
+      - ../backend:/app
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
     networks:
       - auto-test-network
 

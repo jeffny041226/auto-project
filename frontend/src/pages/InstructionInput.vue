@@ -3,32 +3,36 @@
     <el-card>
       <template #header>
         <div class="card-header">
-          <span>Natural Language Test Instruction</span>
+          <span>{{ t('instruction.title') }}</span>
         </div>
       </template>
       <el-form :model="form" label-width="120px">
-        <el-form-item label="Instruction">
+        <el-form-item :label="t('task.instruction')">
           <el-input
             v-model="form.instruction"
             type="textarea"
             :rows="4"
-            placeholder="e.g., Open WeChat and login with account test@example.com"
+            :placeholder="t('instruction.placeholder')"
           />
         </el-form-item>
-        <el-form-item label="Device">
-          <el-select v-model="form.deviceId" placeholder="Select device (optional)">
-            <el-option label="Auto select" value="" />
+        <el-form-item :label="t('task.device')">
+          <el-select v-model="form.deviceId" :placeholder="t('task.selectDevice')">
+            <el-option :label="t('task.autoSelect')" value="" />
             <el-option
               v-for="device in devices"
               :key="device.device_id"
-              :label="device.device_name"
               :value="device.device_id"
-            />
+            >
+              <span>{{ device.device_name }}</span>
+              <el-tag size="small" :type="getDeviceStatusType(device.status)" style="margin-left: 8px">
+                {{ t(`status.${device.status}`) }}
+              </el-tag>
+            </el-option>
           </el-select>
         </el-form-item>
         <el-form-item>
           <el-button type="primary" :loading="submitting" @click="handleSubmit">
-            Generate & Execute
+            {{ t('task.generateExecute') }}
           </el-button>
         </el-form-item>
       </el-form>
@@ -36,19 +40,19 @@
 
     <el-card v-if="parsedResult" style="margin-top: 20px">
       <template #header>
-        <span>Parsed Intention</span>
+        <span>{{ t('task.parsedIntention') }}</span>
       </template>
       <el-descriptions :column="2" border>
-        <el-descriptions-item label="Intent">
+        <el-descriptions-item :label="t('task.intent')">
           <el-tag>{{ parsedResult.intent }}</el-tag>
         </el-descriptions-item>
-        <el-descriptions-item label="Confidence">
+        <el-descriptions-item :label="t('task.confidence')">
           {{ (parsedResult.confidence * 100).toFixed(1) }}%
         </el-descriptions-item>
         <el-descriptions-item
           v-for="(value, key) in parsedResult.entities"
           :key="key"
-          :label="key"
+          :label="String(key)"
         >
           {{ value }}
         </el-descriptions-item>
@@ -57,13 +61,13 @@
 
     <el-card v-if="generatedScript" style="margin-top: 20px">
       <template #header>
-        <span>Generated Script</span>
+        <span>{{ t('task.generatedScript') }}</span>
       </template>
       <el-tabs>
-        <el-tab-pane label="Pseudo Code">
+        <el-tab-pane :label="t('task.pseudoCode')">
           <pre class="code-block">{{ generatedScript.pseudo_code }}</pre>
         </el-tab-pane>
-        <el-tab-pane label="Maestro YAML">
+        <el-tab-pane :label="t('task.maestroYaml')">
           <pre class="code-block">{{ generatedScript.maestro_yaml }}</pre>
         </el-tab-pane>
       </el-tabs>
@@ -71,13 +75,13 @@
 
     <el-card v-if="taskId" style="margin-top: 20px">
       <template #header>
-        <span>Task Created</span>
+        <span>{{ t('task.taskCreated') }}</span>
       </template>
       <div class="task-info">
-        <p>Task ID: <strong>{{ taskId }}</strong></p>
-        <p>Status: <el-tag :type="taskStatus === 'running' ? 'primary' : 'info'">{{ taskStatus }}</el-tag></p>
+        <p>{{ t('task.taskId') }}: <strong>{{ taskId }}</strong></p>
+        <p>{{ t('task.status') }}: <el-tag :type="taskStatus === 'running' ? 'primary' : 'info'">{{ t(`status.${taskStatus}`) }}</el-tag></p>
         <el-button type="primary" @click="$router.push(`/tasks/${taskId}`)">
-          View Task Details
+          {{ t('task.view') }}
         </el-button>
       </div>
     </el-card>
@@ -85,13 +89,13 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { reactive, ref, computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { useDeviceStore } from '@/stores/device'
 import { useTaskStore } from '@/stores/task'
 
-const router = useRouter()
+const { t } = useI18n()
 const deviceStore = useDeviceStore()
 const taskStore = useTaskStore()
 
@@ -108,11 +112,18 @@ const taskStatus = ref('')
 
 const devices = computed(() => deviceStore.devices)
 
-import { computed } from 'vue'
+const getDeviceStatusType = (status: string) => {
+  const types: Record<string, any> = {
+    online: 'success',
+    offline: 'info',
+    busy: 'warning',
+  }
+  return types[status] || 'info'
+}
 
 const handleSubmit = async () => {
   if (!form.instruction.trim()) {
-    ElMessage.warning('Please enter an instruction')
+    ElMessage.warning(t('task.pleaseEnterInstruction'))
     return
   }
 
@@ -123,7 +134,7 @@ const handleSubmit = async () => {
     taskId.value = task.task_id
     taskStatus.value = task.status
 
-    ElMessage.success('Task created successfully')
+    ElMessage.success(t('task.taskCreatedSuccess'))
 
     // In a real implementation, we would poll or use WebSocket to get the parsed result
     // For now, simulate getting parsed intention
@@ -136,7 +147,7 @@ const handleSubmit = async () => {
       },
     }
   } catch (error: any) {
-    ElMessage.error(error.message || 'Failed to create task')
+    ElMessage.error(error.message || t('task.failedToCreateTask'))
   } finally {
     submitting.value = false
   }
