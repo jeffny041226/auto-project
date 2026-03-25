@@ -20,6 +20,8 @@ class Screenshot:
     width: int
     height: int
     is_sensitive: bool = False
+    original_width: int = 0
+    original_height: int = 0
 
 
 def get_screenshot(device_id: str | None = None, timeout: int = 10) -> Screenshot:
@@ -67,7 +69,18 @@ def get_screenshot(device_id: str | None = None, timeout: int = 10) -> Screensho
 
         # Read and encode image
         img = Image.open(temp_path)
-        width, height = img.size
+        original_width, original_height = img.size
+        width, height = original_width, original_height
+
+        # Resize if image exceeds 2048x2048 (model limit)
+        max_size = 2048
+        resize_ratio = 1.0
+        if width > max_size or height > max_size:
+            resize_ratio = min(max_size / width, max_size / height)
+            new_width = int(width * resize_ratio)
+            new_height = int(height * resize_ratio)
+            img = img.resize((new_width, new_height), Image.LANCZOS)
+            width, height = new_width, new_height
 
         buffered = BytesIO()
         img.save(buffered, format="PNG")
@@ -77,7 +90,12 @@ def get_screenshot(device_id: str | None = None, timeout: int = 10) -> Screensho
         os.remove(temp_path)
 
         return Screenshot(
-            base64_data=base64_data, width=width, height=height, is_sensitive=False
+            base64_data=base64_data,
+            width=width,
+            height=height,
+            is_sensitive=False,
+            original_width=original_width,
+            original_height=original_height,
         )
 
     except Exception as e:

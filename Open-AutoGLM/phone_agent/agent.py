@@ -204,16 +204,18 @@ class PhoneAgent:
         # Remove image from context to save space
         self._context[-1] = MessageBuilder.remove_images_from_message(self._context[-1])
 
-        # Execute action
+        # Execute action - use original dimensions if available for coordinate conversion
+        screen_w = screenshot.original_width if screenshot.original_width > 0 else screenshot.width
+        screen_h = screenshot.original_height if screenshot.original_height > 0 else screenshot.height
         try:
             result = self.action_handler.execute(
-                action, screenshot.width, screenshot.height
+                action, screen_w, screen_h
             )
         except Exception as e:
             if self.agent_config.verbose:
                 traceback.print_exc()
             result = self.action_handler.execute(
-                finish(message=str(e)), screenshot.width, screenshot.height
+                finish(message=str(e)), screen_w, screen_h
             )
 
         # Add assistant response to context
