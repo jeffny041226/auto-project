@@ -18,11 +18,13 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from urllib.parse import urlparse
 
 from openai import OpenAI
 
 from phone_agent import PhoneAgent
+from phone_agent.websocket_client import WebSocketClient, WebSocketConfig
 from phone_agent.agent import AgentConfig
 from phone_agent.agent_ios import IOSAgentConfig, IOSPhoneAgent
 from phone_agent.config.apps import list_supported_apps
@@ -398,6 +400,9 @@ Examples:
 
     # Pair with iOS device
     python main.py --device-type ios --pair
+
+    # WebSocket client mode (for backend integration)
+    python main.py --mode websocket --ws-url "ws://localhost:8000/ws/devices/DEVICE_ID" --device-id "DEVICE_ID"
         """,
     )
 
@@ -492,6 +497,21 @@ Examples:
     # Other options
     parser.add_argument(
         "--quiet", "-q", action="store_true", help="Suppress verbose output"
+    )
+
+    # WebSocket client mode options
+    parser.add_argument(
+        "--mode",
+        type=str,
+        choices=["cli", "websocket"],
+        default="cli",
+        help="Operation mode: cli for interactive/CLI mode, websocket for backend integration (default: cli)",
+    )
+
+    parser.add_argument(
+        "--ws-url",
+        type=str,
+        help="WebSocket URL for backend connection (required in websocket mode)",
     )
 
     parser.add_argument(
@@ -729,6 +749,42 @@ def main():
 
     # Handle device commands (these may need partial system checks)
     if handle_device_commands(args):
+        return
+
+    # Handle WebSocket client mode first (before system checks)
+    if args.mode == "websocket":
+        if not args.ws_url:
+            print("Error: --ws-url is required in websocket mode")
+            sys.exit(1)
+
+        ws_config = WebSocketConfig(
+            ws_url=args.ws_url,
+            device_id=args.device_id or "",
+            base_url=args.base_url,
+            model=args.model,
+            apikey=args.apikey,
+            max_steps=args.max_steps,
+            lang=args.lang,
+            verbose=not args.quiet,
+        )
+
+        print("=" * 50)
+        print("Phone Agent - WebSocket Client Mode")
+        print("=" * 50)
+        print(f"WebSocket URL: {ws_config.ws_url}")
+        print(f"Device ID: {ws_config.device_id}")
+        print(f"Model: {ws_config.model}")
+        print("=" * 50)
+
+        client = WebSocketClient(ws_config)
+        try:
+            client.start()
+            print("WebSocket client started. Press Ctrl+C to stop.")
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print("\nShutting down...")
+            client.stop()
         return
 
     # Run system requirements check before proceeding
