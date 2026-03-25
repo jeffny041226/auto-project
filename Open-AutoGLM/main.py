@@ -34,6 +34,7 @@ from phone_agent.device_factory import DeviceType, get_device_factory, set_devic
 from phone_agent.model import ModelConfig
 from phone_agent.xctest import XCTestConnection
 from phone_agent.xctest import list_devices as list_ios_devices
+from phone_agent.config.config_loader import load_config, resolve_device_id, resolve_ws_url
 
 
 def check_system_requirements(
@@ -511,7 +512,13 @@ Examples:
     parser.add_argument(
         "--ws-url",
         type=str,
-        help="WebSocket URL for backend connection (required in websocket mode)",
+        help="WebSocket URL for backend connection (required in websocket mode, can use config file instead)",
+    )
+
+    parser.add_argument(
+        "--config",
+        type=str,
+        help="Path to agent config file (default: phone_agent/config/agent_config.json)",
     )
 
     parser.add_argument(
@@ -753,18 +760,36 @@ def main():
 
     # Handle WebSocket client mode first (before system checks)
     if args.mode == "websocket":
-        if not args.ws_url:
-            print("Error: --ws-url is required in websocket mode")
-            sys.exit(1)
+        # Load config from file if provided
+        config = load_config(args.config)
+
+        # Override with command-line arguments if provided
+        base_url = args.base_url if args.base_url != os.getenv("PHONE_AGENT_BASE_URL", "http://localhost:8000/v1") else config.llm.base_url
+        model = args.model if args.model != os.getenv("PHONE_AGENT_MODEL", "autoglm-phone-9b") else config.llm.model
+        apikey = args.apikey if args.apikey != os.getenv("PHONE_AGENT_API_KEY", "EMPTY") else config.llm.api_key
+        max_steps = args.max_steps if args.max_steps != int(os.getenv("PHONE_AGENT_MAX_STEPS", "100")) else config.agent.max_steps
+        lang = args.lang if args.lang != os.getenv("PHONE_AGENT_LANG", "cn") else config.agent.lang
+
+        # Resolve device ID
+        if args.device_id:
+            device_id = args.device_id
+        else:
+            device_factory = get_device_factory()
+            devices = device_factory.list_devices()
+            device_ids = [d.device_id for d in devices] if devices else []
+            device_id = resolve_device_id(config, device_ids)
+
+        # Resolve WebSocket URL
+        ws_url = args.ws_url if args.ws_url else resolve_ws_url(config, device_id)
 
         ws_config = WebSocketConfig(
-            ws_url=args.ws_url,
-            device_id=args.device_id or "",
-            base_url=args.base_url,
-            model=args.model,
-            apikey=args.apikey,
-            max_steps=args.max_steps,
-            lang=args.lang,
+            ws_url=ws_url,
+            device_id=device_id,
+            base_url=base_url,
+            model=model,
+            apikey=apikey,
+            max_steps=max_steps,
+            lang=lang,
             verbose=not args.quiet,
         )
 

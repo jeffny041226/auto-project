@@ -58,5 +58,13 @@ export const useDeviceStore = defineStore('device', {
       }
       return device
     },
+
+    updateDeviceStatus(deviceId: string, newStatus: string) {
+      const device = this.devices.find((d) => d.device_id === deviceId)
+      if (device) {
+        device.status = newStatus
+        device.last_heartbeat = new Date().toISOString()
+      }
+    },
   },
 })

@@ -27,7 +27,7 @@ def process_task(
     instruction: str,
     device_id: str = None,
 ) -> dict[str, Any]:
-    """Process a task: generate script and execute.
+    """Process a task by sending to connected agent via WebSocket.
 
     Args:
         task_id: Task ID
@@ -41,72 +41,41 @@ def process_task(
     logger.info(f"Processing task: {task_id}")
 
     async def _process():
-        # Connect to Redis for device pool
-        from app.db.redis import redis_client
-        await redis_client.connect()
+        from app.core.device.agent import device_agent_manager
+        from app.services.task import TaskService
 
+        # Check if there's a connected device agent
+        if not device_id:
+            return {"success": False, "error": "No device_id provided"}
+
+        device_conn = await device_agent_manager.get_connection(device_id)
+        if not device_conn or not device_conn.is_connected:
+            logger.warning(f"No connected agent for device {device_id}")
+            return {"success": False, "error": f"No connected agent for device {device_id}"}
+
+        # Update task status to running
         async with get_db_context() as db:
-            from app.services.task import TaskService
-
-            # Try to find matching script
-            matcher = ScriptMatcher(db)
-            script = await matcher.find_similar(instruction, user_id)
-
-            if not script:
-                # Generate new script
-                parser = InstructionParser()
-                parsed = parser.parse(instruction)
-
-                classifier = IntentClassifier()
-                intent_result = await classifier.classify(parsed.cleaned)
-                intent = intent_result.get("intent", "tap")
-                entities = intent_result.get("entities", {})
-
-                generator = ScriptGenerator()
-                template = MaestroTemplate()
-
-                generated = await generator.generate(intent, entities, instruction)
-                steps = generated.get("steps", [])
-
-                maestro_yaml = template.render(
-                    steps=steps,
-                    app_id=entities.get("package", "com.example.app"),
-                    flow_name=f"Test: {intent}",
-                )
-
-                # Save script
-                manager = ScriptManager(db)
-                script = await manager.save_generated(
-                    user_id=user_id,
-                    intent=intent,
-                    structured_instruction={"intent": intent, "entities": entities},
-                    pseudo_code=str(generated),
-                    maestro_yaml=maestro_yaml,
-                )
-
-                await matcher.store_embedding(script, instruction)
-                logger.info(f"Generated new script: {script.script_id}")
-            else:
-                logger.info(f"Matched existing script: {script.script_id}")
-
-            # Update task with script_id and set to running
             task_service = TaskService(db)
-            await task_service.update_task_by_id(task_id, {"script_id": script.script_id, "status": "running"})
+            await task_service.update_task_by_id(task_id, {"status": "running"})
 
-            # Execute via scheduler
-            scheduler = TaskScheduler(db)
-            result = await scheduler.execute_task(
-                task_id=task_id,
-                script_content=script.maestro_yaml,
-                device_id=device_id,
-            )
-
-            return {
-                "success": result.get("success", False),
+        # Send task to agent via WebSocket
+        logger.info(f"Sending task {task_id} to agent {device_id} via WebSocket")
+        await device_conn.send_command({
+            "action": "run_task",
+            "params": {
+                "task": instruction,
                 "task_id": task_id,
-                "script_id": script.script_id,
-                "error": result.get("error"),
+                "max_steps": 100,
+                "lang": "cn",
+                "app_id": None,
             }
+        })
+
+        return {
+            "success": True,
+            "task_id": task_id,
+            "message": "Task sent to agent",
+        }
 
     try:
         loop = asyncio.get_event_loop()

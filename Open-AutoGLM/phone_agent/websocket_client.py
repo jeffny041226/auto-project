@@ -90,11 +90,25 @@ class WebSocketClient:
                 self._reconnect_delay = 1.0
                 self._loop = asyncio.get_running_loop()
                 print(f"Connected to {self.config.ws_url}")
+                # Send registration message
+                await self._send_register(ws)
                 await self._handle_messages(ws)
         except Exception as e:
             if self._running:
                 raise
             raise
+
+    async def _send_register(self, ws) -> None:
+        """Send registration message to backend."""
+        await self._send_message(ws, {
+            "type": "register",
+            "device_id": self.config.device_id,
+            "device_name": self.config.device_id,  # TODO: get actual device name
+            "capabilities": {
+                "max_steps": self.config.max_steps,
+                "lang": self.config.lang,
+            }
+        })
 
     async def _handle_messages(self, ws) -> None:
         """Handle incoming WebSocket messages."""
@@ -120,7 +134,10 @@ class WebSocketClient:
 
     async def _handle_ping(self, ws) -> None:
         """Respond to ping with pong."""
-        await self._send_message(ws, {"type": "pong"})
+        await self._send_message(ws, {
+            "type": "pong",
+            "device_id": self.config.device_id,
+        })
 
     async def _handle_command(self, ws, data: dict[str, Any]) -> None:
         """Handle command from backend."""

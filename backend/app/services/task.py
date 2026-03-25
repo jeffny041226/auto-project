@@ -21,7 +21,7 @@ class TaskService:
         self.db = db
 
     async def create_task(self, task_data: TaskCreate, user_id: int) -> TaskResponse:
-        """Create a new task."""
+        """Create a new task and send to agent via WebSocket."""
         # Convert empty string to None for foreign key fields
         device_id = task_data.device_id if task_data.device_id else None
 
@@ -41,14 +41,28 @@ class TaskService:
 
         logger.info(f"Task created: {task.task_id}")
 
-        # Trigger Celery task to process the task (non-blocking)
-        from app.tasks.celery_app import celery_app
-        celery_app.send_task(
-            "app.tasks.task_execution.process_task",
-            args=[task.task_id, user_id, task_data.instruction],
-            kwargs={"device_id": device_id},
-        )
-        logger.info(f"Triggered process_task for task: {task.task_id}")
+        # Send task directly to agent via WebSocket
+        if device_id:
+            from app.core.device.agent import device_agent_manager
+            device_conn = await device_agent_manager.get_connection(device_id)
+            if device_conn and device_conn.is_connected:
+                await device_conn.send_command({
+                    "action": "run_task",
+                    "params": {
+                        "task": task_data.instruction,
+                        "task_id": task.task_id,
+                        "max_steps": 100,
+                        "lang": "cn",
+                        "app_id": None,
+                    }
+                })
+                task.status = "running"
+                await self.db.flush()
+                logger.info(f"Task {task.task_id} sent to agent {device_id}")
+            else:
+                logger.warning(f"No connected agent for device {device_id}")
+        else:
+            logger.warning(f"No device_id provided for task {task.task_id}")
 
         return TaskResponse.model_validate(task)
 

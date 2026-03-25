@@ -1,6 +1,7 @@
 "use WebSocket composable for real-time updates."
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useUserStore } from '@/stores/user'
+import { useDeviceStore } from '@/stores/device'
 
 interface WebSocketMessage {
   type: string
@@ -9,6 +10,7 @@ interface WebSocketMessage {
 
 export function useWebSocket() {
   const userStore = useUserStore()
+  const deviceStore = useDeviceStore()
   const connected = ref(false)
   const messages = ref<WebSocketMessage[]>([])
   const error = ref<string | null>(null)
@@ -53,6 +55,9 @@ export function useWebSocket() {
               break
             case 'task_completed':
               handleTaskCompleted(message)
+              break
+            case 'device_status_change':
+              handleDeviceStatusChange(message)
               break
             case 'connected':
               console.log('WebSocket authenticated')
@@ -133,6 +138,12 @@ export function useWebSocket() {
   const handleTaskCompleted = (message: WebSocketMessage) => {
     console.log('Task completed:', message)
     // Can show notification
+  }
+
+  const handleDeviceStatusChange = (message: WebSocketMessage) => {
+    const { device_id, status } = message
+    console.log(`Device ${device_id} status changed to ${status}`)
+    deviceStore.updateDeviceStatus(device_id, status)
   }
 
   onMounted(() => {

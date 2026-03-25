@@ -1,0 +1,18 @@
+{
+  "llm": {
+    "base_url": "https://api-inference.modelscope.cn/v1",
+    "model": "ZhipuAI/AutoGLM-Phone-9B",
+    "api_key": "ms-ba78c487-f9e8-4ad6-a2ab-5240d341ab43"
+  },
+  "server": {
+    "ws_url": "ws://localhost:8000/ws/devices/{device_id}",
+    "heartbeat_interval": 30
+  },
+  "agent": {
+    "device_id": "auto",
+    "device_name": "我的手机",
+    "device_type": "adb",
+    "max_steps": 100,
+    "lang": "cn"
+  }
+}
