@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from app.utils.logger import get_logger, get_trace_id
+from app.core.device.agent import device_agent_manager
 
 logger = get_logger(__name__)
 
@@ -138,7 +139,26 @@ class AgentProcessManager:
             self._processes[process_id] = agent_process
             self._tasks[task_id] = task_status
 
-            # Start the subprocess
+            # Check if there's a connected device agent via WebSocket
+            device_conn = await device_agent_manager.get_connection(device_serial)
+            if device_conn and device_conn.is_connected:
+                # Send task via WebSocket to connected device agent
+                logger.info(f"[{trace_id}] Sending task {task_id} to connected device agent {device_serial} via WebSocket")
+                await device_conn.send_command({
+                    "action": "run_task",
+                    "params": {
+                        "task": instruction,
+                        "task_id": task_id,
+                        "max_steps": agent_config.max_steps,
+                        "lang": agent_config.lang,
+                        "app_id": agent_config.app_id,
+                    }
+                })
+                task_status.status = "running"
+                return task_id
+
+            # Fall back to subprocess mode (compat mode)
+            logger.info(f"[{trace_id}] No connected agent for {device_serial}, spawning subprocess")
             await self._spawn_process(agent_process)
 
             return task_id

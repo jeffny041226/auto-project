@@ -13,6 +13,7 @@ from app.db.redis import redis_client
 from app.db.minio import minio_client
 from app.utils.logger import LoggerMixin, setup_logging, TraceIdMiddleware
 from app.core.device.scanner import start_device_scanner, stop_device_scanner
+from app.core.device.agent import device_agent_manager
 
 
 @asynccontextmanager
@@ -39,9 +40,14 @@ async def lifespan(app: FastAPI):
     await start_device_scanner(async_session_factory)
     logger.info("ADB device scanner started")
 
+    # Start device heartbeat monitoring
+    await device_agent_manager.start_heartbeat_monitoring()
+    logger.info("Device heartbeat monitoring started")
+
     yield
 
     # Shutdown
+    await device_agent_manager.stop_heartbeat_monitoring()
     await stop_device_scanner()
     await redis_client.close()
     await close_db()
