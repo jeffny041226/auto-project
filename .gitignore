@@ -64,3 +64,4 @@ credentials.json
 .pytest_cache/
 .coverage
 htmlcov/
+ADBKeyboard.apk
