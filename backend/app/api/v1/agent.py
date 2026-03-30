@@ -7,6 +7,7 @@ This module provides REST endpoints for:
 - Managing agent processes
 """
 
+import uuid
 from typing import Optional
 from pydantic import BaseModel, Field
 
@@ -74,6 +75,7 @@ class AgentScriptReuseRequest(BaseModel):
 async def create_agent_task(
     request: AgentTaskCreate,
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Create a new agent task.
 
@@ -91,6 +93,20 @@ async def create_agent_task(
                 detail=f"Device {request.device_serial} already has a running agent task: {existing.task_id}",
             )
 
+        # Save task to database first
+        from app.models.task import Task
+        task_id = str(uuid.uuid4())
+        db_task = Task(
+            task_id=task_id,
+            user_id=current_user.id,
+            instruction=request.instruction,
+            device_id=request.device_serial,
+            status="starting",
+            total_steps=request.max_steps,
+        )
+        db.add(db_task)
+        await db.commit()
+
         # Start the agent
         config = {
             "autoglm_path": request.autoglm_path,
@@ -98,11 +114,13 @@ async def create_agent_task(
             "timeout": request.timeout,
             "app_id": request.app_id,
             "lang": request.lang,
+            "user_id": current_user.id,
         }
 
-        task_id = await agent_process_manager.start_agent(
+        internal_task_id = await agent_process_manager.start_agent(
             device_serial=request.device_serial,
             instruction=request.instruction,
+            task_id=task_id,  # Pass the database task_id
             config=config,
         )
 

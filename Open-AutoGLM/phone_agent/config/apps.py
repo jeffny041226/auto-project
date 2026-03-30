@@ -1,6 +1,8 @@
 """App name to package name mapping for supported applications."""
 
 APP_PACKAGES: dict[str, str] = {
+    # Chinese Apps
+    "山海": "com.mgshuzhi.shanhai",
     # Social & Messaging
     "微信": "com.tencent.mm",
     "QQ": "com.tencent.mobileqq",

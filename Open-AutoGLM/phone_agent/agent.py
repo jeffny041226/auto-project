@@ -3,9 +3,10 @@
 import json
 import traceback
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 from phone_agent.actions import ActionHandler
+from phone_agent.actions.element import ElementInfo
 from phone_agent.actions.handler import do, finish, parse_action
 from phone_agent.config import get_messages, get_system_prompt
 from phone_agent.device_factory import get_device_factory
@@ -37,6 +38,7 @@ class StepResult:
     action: dict[str, Any] | None
     thinking: str
     message: str | None = None
+    element_info: Optional[ElementInfo] = None
 
 
 class PhoneAgent:
@@ -80,8 +82,9 @@ class PhoneAgent:
 
         self._context: list[dict[str, Any]] = []
         self._step_count = 0
+        self._step_history: list[StepResult] = []
 
-    def run(self, task: str) -> str:
+    def run(self, task: str) -> tuple[str, list["StepResult"]]:
         """
         Run the agent to complete a task.
 
@@ -89,25 +92,28 @@ class PhoneAgent:
             task: Natural language description of the task.
 
         Returns:
-            Final message from the agent.
+            Tuple of (final message, list of StepResult with element_info)
         """
         self._context = []
         self._step_count = 0
+        self._step_history = []
 
         # First step with user prompt
         result = self._execute_step(task, is_first=True)
+        self._step_history.append(result)
 
         if result.finished:
-            return result.message or "Task completed"
+            return result.message or "Task completed", self._step_history
 
         # Continue until finished or max steps reached
         while self._step_count < self.agent_config.max_steps:
             result = self._execute_step(is_first=False)
+            self._step_history.append(result)
 
             if result.finished:
-                return result.message or "Task completed"
+                return result.message or "Task completed", self._step_history
 
-        return "Max steps reached"
+        return "Max steps reached", self._step_history
 
     def step(self, task: str | None = None) -> StepResult:
         """
@@ -209,7 +215,7 @@ class PhoneAgent:
         screen_h = screenshot.original_height if screenshot.original_height > 0 else screenshot.height
         try:
             result = self.action_handler.execute(
-                action, screen_w, screen_h
+                action, screen_w, screen_h, thinking=response.thinking
             )
         except Exception as e:
             if self.agent_config.verbose:
@@ -242,6 +248,7 @@ class PhoneAgent:
             action=action,
             thinking=response.thinking,
             message=result.message or action.get("message"),
+            element_info=getattr(result, 'element_info', None),
         )
 
     @property
@@ -253,3 +260,8 @@ class PhoneAgent:
     def step_count(self) -> int:
         """Get the current step count."""
         return self._step_count
+
+    @property
+    def step_history(self) -> list["StepResult"]:
+        """Get the step history with element_info."""
+        return self._step_history.copy()

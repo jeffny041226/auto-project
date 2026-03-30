@@ -5,10 +5,35 @@ import re
 import subprocess
 import time
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 from phone_agent.config.timing import TIMING_CONFIG
 from phone_agent.device_factory import get_device_factory
+
+
+@dataclass
+class ElementInfo:
+    """UI element information for Maestro script generation."""
+
+    text: Optional[str] = None
+    resource_id: Optional[str] = None
+    bounds: Optional[list[int]] = None
+    center_coords: Optional[list[int]] = None
+    content_desc: Optional[str] = None
+    clickable: bool = False
+    enabled: bool = True
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for serialization."""
+        return {
+            "text": self.text,
+            "resource_id": self.resource_id,
+            "bounds": self.bounds,
+            "center_coords": self.center_coords,
+            "content_desc": self.content_desc,
+            "clickable": self.clickable,
+            "enabled": self.enabled,
+        }
 
 
 @dataclass
@@ -19,6 +44,7 @@ class ActionResult:
     should_finish: bool
     message: str | None = None
     requires_confirmation: bool = False
+    element_info: Optional[ElementInfo] = None
 
 
 class ActionHandler:
@@ -43,7 +69,7 @@ class ActionHandler:
         self.takeover_callback = takeover_callback or self._default_takeover
 
     def execute(
-        self, action: dict[str, Any], screen_width: int, screen_height: int
+        self, action: dict[str, Any], screen_width: int, screen_height: int, thinking: str = ""
     ) -> ActionResult:
         """
         Execute an action from the AI model.
@@ -52,10 +78,12 @@ class ActionHandler:
             action: The action dictionary from the model.
             screen_width: Current screen width in pixels.
             screen_height: Current screen height in pixels.
+            thinking: The LLM's thinking process (used for element identification).
 
         Returns:
             ActionResult indicating success and whether to finish.
         """
+        self._thinking = thinking  # Store for use in handlers
         action_type = action.get("_metadata")
 
         if action_type == "finish":
@@ -115,6 +143,249 @@ class ActionHandler:
         y = int(element[1] / 1000 * screen_height)
         return x, y
 
+    def _find_element_at_point(self, x: int, y: int) -> Optional[ElementInfo]:
+        """Find UI element at a specific point coordinate.
+
+        Args:
+            x: X coordinate
+            y: Y coordinate
+
+        Returns:
+            ElementInfo of the element at the point, or None if not found
+        """
+        try:
+            # Use subprocess directly with adb shell
+            serial = self.device_id or ""
+            cmd = f"adb {'-s ' + serial if serial else ''} shell uiautomator dump /sdcard/ui.xml && adb {'-s ' + serial if serial else ''} shell cat /sdcard/ui.xml"
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, encoding="utf-8")
+            output = result.stdout if result.returncode == 0 else ""
+
+            import re
+            # Find all node elements with bounds
+            node_pattern = r'<node[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"[^>]*>'
+            matches = list(re.finditer(node_pattern, output))
+
+            # Find the MOST SPECIFIC element (smallest bounds) containing the point
+            # This avoids returning parent containers that also contain the point
+            best_match = None
+            best_area = float('inf')
+
+            for match in matches:
+                x1, y1, x2, y2 = int(match.group(1)), int(match.group(2)), int(match.group(3)), int(match.group(4))
+                # Check if point (x, y) is within bounds
+                if x1 <= x <= x2 and y1 <= y <= y2:
+                    # Calculate area (smaller = more specific)
+                    area = (x2 - x1) * (y2 - y1)
+                    if area < best_area:
+                        best_area = area
+                        best_match = match
+
+            if best_match:
+                match = best_match
+                x1, y1, x2, y2 = int(match.group(1)), int(match.group(2)), int(match.group(3)), int(match.group(4))
+
+                # Use match boundaries directly (regex consumes the full tag)
+                element_context = output[match.start():match.end()]
+
+                # Extract attributes
+                id_match = re.search(r'resource-id="([^"]*)"', element_context)
+                resource_id = id_match.group(1) if id_match else None
+
+                text_match = re.search(r'text="([^"]*)"', element_context)
+                text = text_match.group(1) if text_match else None
+
+                desc_match = re.search(r'content-desc="([^"]*)"', element_context)
+                content_desc = desc_match.group(1) if desc_match else None
+
+                clickable_match = re.search(r'clickable="([^"]*)"', element_context)
+                clickable = clickable_match.group(1).lower() == "true" if clickable_match else False
+
+                enabled_match = re.search(r'enabled="([^"]*)"', element_context)
+                enabled = enabled_match.group(1).lower() != "false" if enabled_match else True
+
+                bounds = [x1, y1, x2, y2]
+                center_coords = [(x1 + x2) // 2, (y1 + y2) // 2]
+
+                print(f"[DEBUG] _find_element_at_point({x}, {y}): found element: text={repr(text)}, resource_id={repr(resource_id)}, content_desc={repr(content_desc)}, bounds={bounds}")
+
+                return ElementInfo(
+                    text=text,
+                    resource_id=resource_id,
+                    bounds=bounds,
+                    center_coords=center_coords,
+                    content_desc=content_desc,
+                    clickable=clickable,
+                    enabled=enabled,
+                )
+
+            return None
+        except Exception as e:
+            return None
+
+    def _find_element_by_text_or_desc(self) -> Optional[ElementInfo]:
+        """Find a clickable element by text or content-desc.
+
+        When coordinates are wrong, we can still find elements by their text/content-desc.
+
+        Returns:
+            ElementInfo of a clickable element with text/content-desc, or None
+        """
+        try:
+            serial = self.device_id or ""
+            cmd = f"adb {'-s ' + serial if serial else ''} shell uiautomator dump /sdcard/ui.xml && adb {'-s ' + serial if serial else ''} shell cat /sdcard/ui.xml"
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, encoding="utf-8")
+            output = result.stdout if result.returncode == 0 else ""
+
+            import re
+
+            # Find all node elements with bounds
+            node_pattern = r'<node[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"[^>]*>'
+            matches = list(re.finditer(node_pattern, output))
+
+            for match in matches:
+                x1, y1, x2, y2 = int(match.group(1)), int(match.group(2)), int(match.group(3)), int(match.group(4))
+
+                # Get the full node context
+                element_start = match.start()
+                while element_start > 0 and output[element_start] != '<':
+                    element_start -= 1
+                element_end = match.end()
+                while element_end < len(output) and output[element_end] != '>':
+                    element_end += 1
+                element_end += 1
+                element_context = output[element_start:element_end]
+
+                # Extract attributes
+                clickable_match = re.search(r'clickable="([^"]*)"', element_context)
+                clickable = clickable_match and clickable_match.group(1).lower() == "true"
+
+                # Skip non-clickable elements
+                if not clickable:
+                    continue
+
+                text_match = re.search(r'text="([^"]*)"', element_context)
+                text = text_match.group(1) if text_match else None
+
+                desc_match = re.search(r'content-desc="([^"]*)"', element_context)
+                content_desc = desc_match.group(1) if desc_match else None
+
+                # Skip elements with no text and no content_desc
+                if not text and not content_desc:
+                    continue
+
+                # Skip system elements
+                if text and (text.startswith("android:") or text.startswith("input:")):
+                    continue
+
+                bounds = [x1, y1, x2, y2]
+                center_coords = [(x1 + x2) // 2, (y1 + y2) // 2]
+
+                return ElementInfo(
+                    text=text if text else None,
+                    resource_id=None,
+                    bounds=bounds,
+                    center_coords=center_coords,
+                    content_desc=content_desc if content_desc else None,
+                    clickable=True,
+                    enabled=True,
+                )
+
+            return None
+        except Exception as e:
+            print(f"[DEBUG] _find_element_by_text_or_desc failed: {e}")
+            return None
+
+    def _find_element_by_thinking(self, fallback_x: int, fallback_y: int) -> Optional[ElementInfo]:
+        """Find element based on LLM thinking text.
+
+        When coordinates are wrong, use the thinking text to find the intended element.
+
+        Args:
+            fallback_x: Fallback X coordinate if search fails
+            fallback_y: Fallback Y coordinate if search fails
+
+        Returns:
+            ElementInfo of the intended element, or None
+        """
+        thinking = getattr(self, '_thinking', '') or ''
+        if not thinking:
+            return None
+
+        import re
+        # Extract potential target text from thinking
+        # Looking for patterns like "点击XX" or "tap on XX"
+        patterns = [
+            r'点击[到]?[的]?(.+?)(?:图标|按钮|区域|元素)',
+            r'tap\s+(?:on\s+)?(.+?)(?:icon|button|area|element)',
+        ]
+
+        target_text = None
+        for pattern in patterns:
+            match = re.search(pattern, thinking)
+            if match:
+                target_text = match.group(1).strip()
+                break
+
+        if not target_text:
+            return None
+
+        print(f"[DEBUG] _find_element_by_thinking: target_text={repr(target_text)}")
+
+        # Search XML for element with matching text or content_desc
+        try:
+            serial = self.device_id or ""
+            cmd = f"adb {'-s ' + serial if serial else ''} shell uiautomator dump /sdcard/ui.xml && adb {'-s ' + serial if serial else ''} shell cat /sdcard/ui.xml"
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, encoding="utf-8")
+            output = result.stdout if result.returncode == 0 else ""
+
+            # Find elements with matching text
+            node_pattern = r'<node[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"[^>]*>'
+            matches = list(re.finditer(node_pattern, output))
+
+            for match in matches:
+                x1, y1, x2, y2 = int(match.group(1)), int(match.group(2)), int(match.group(3)), int(match.group(4))
+
+                # Use match boundaries directly (regex consumes the full tag)
+                element_context = output[match.start():match.end()]
+
+                text_match = re.search(r'text="([^"]*)"', element_context)
+                text = text_match.group(1) if text_match else None
+
+                desc_match = re.search(r'content-desc="([^"]*)"', element_context)
+                content_desc = desc_match.group(1) if desc_match else None
+
+                id_match = re.search(r'resource-id="([^"]*)"', element_context)
+                resource_id = id_match.group(1) if id_match else None
+
+                # Check if this element matches our target
+                if text and target_text in text:
+                    print(f"[DEBUG] Found matching element: text={repr(text)}, resource_id={repr(resource_id)}")
+                    return ElementInfo(
+                        text=text,
+                        resource_id=resource_id,
+                        bounds=[x1, y1, x2, y2],
+                        center_coords=[(x1+x2)//2, (y1+y2)//2],
+                        content_desc=content_desc,
+                        clickable=True,
+                        enabled=True,
+                    )
+                if content_desc and target_text in content_desc:
+                    print(f"[DEBUG] Found matching element: content_desc={repr(content_desc)}, resource_id={repr(resource_id)}")
+                    return ElementInfo(
+                        text=text,
+                        resource_id=resource_id,
+                        bounds=[x1, y1, x2, y2],
+                        center_coords=[(x1+x2)//2, (y1+y2)//2],
+                        content_desc=content_desc,
+                        clickable=True,
+                        enabled=True,
+                    )
+
+            return None
+        except Exception as e:
+            print(f"[DEBUG] _find_element_by_thinking failed: {e}")
+            return None
+
     def _handle_launch(self, action: dict, width: int, height: int) -> ActionResult:
         """Handle app launch action."""
         app_name = action.get("app")
@@ -122,9 +393,16 @@ class ActionHandler:
             return ActionResult(False, False, "No app name specified")
 
         device_factory = get_device_factory()
-        success = device_factory.launch_app(app_name, self.device_id)
-        if success:
-            return ActionResult(True, False)
+        package_name = device_factory.launch_app(app_name, self.device_id)
+        if package_name:
+            # Create element_info for launch action with the actual package name
+            element_info = ElementInfo(
+                text=app_name,
+                resource_id=package_name,  # Store actual package name in resource_id
+                bounds=None,
+                center_coords=None,
+            )
+            return ActionResult(True, False, element_info=element_info)
         return ActionResult(False, False, f"App not found: {app_name}")
 
     def _handle_tap(self, action: dict, width: int, height: int) -> ActionResult:
@@ -144,13 +422,65 @@ class ActionHandler:
                     message="User cancelled sensitive operation",
                 )
 
+        # BEFORE TAP: Capture element info at target coordinates
+        # This is critical because after tap, UI may change
+        element_info = self._find_element_at_point(x, y)
+
+        # If found element has no identifying attributes (text/id/desc),
+        # try to find the intended element using thinking as hint
+        if element_info and not (element_info.text or element_info.resource_id or element_info.content_desc):
+            target_element = self._find_element_by_thinking(x, y)
+            if target_element:
+                element_info = target_element
+                # Update coordinates to the correct ones
+                x, y = element_info.center_coords
+
+        # If still no useful element, use coordinate-based bounds
+        if not element_info or not (element_info.text or element_info.resource_id or element_info.content_desc):
+            element_info = ElementInfo(
+                bounds=[x - 10, y - 10, x + 10, y + 10],
+                center_coords=[x, y],
+            )
+
+        # Capture screenshot BEFORE tap for image-based matching
+        screenshot_data = self._capture_screenshot_base64()
+        if element_info and screenshot_data:
+            element_info.screenshot = screenshot_data
+
+        # Execute the tap
         device_factory = get_device_factory()
         device_factory.tap(x, y, self.device_id)
-        return ActionResult(True, False)
+
+        return ActionResult(True, False, element_info=element_info)
+
+    def _capture_screenshot_base64(self) -> Optional[str]:
+        """Capture screenshot and return as base64 encoded string.
+
+        Returns:
+            Base64 encoded PNG screenshot, or None if capture fails
+        """
+        import base64
+        try:
+            serial = self.device_id or ""
+            adb_prefix = f"adb {'-s ' + serial if serial else ''}".split()
+            # Capture screenshot to temp file
+            temp_path = "/sdcard/temp_screenshot.png"
+            subprocess.run([*adb_prefix, "shell", "screencap", "-p", temp_path], capture_output=True)
+            # Read and encode
+            result = subprocess.run([*adb_prefix, "shell", "cat", temp_path, "|", "base64"], capture_output=True, text=True)
+            # Clean up
+            subprocess.run([*adb_prefix, "shell", "rm", temp_path], capture_output=True)
+            if result.stdout:
+                return result.stdout.strip()
+            return None
+        except Exception as e:
+            print(f"[DEBUG] Screenshot capture failed: {e}")
+            return None
 
     def _handle_type(self, action: dict, width: int, height: int) -> ActionResult:
         """Handle text input action."""
         text = action.get("text", "")
+        print(f"[DEBUG] _handle_type: about to type text={repr(text)}, length={len(text)}")
 
         device_factory = get_device_factory()
 
@@ -348,15 +678,20 @@ def parse_action(response: str) -> dict[str, Any]:
         if response.startswith('do(action="Type"') or response.startswith(
             'do(action="Type_Name"'
         ):
+            print(f"[DEBUG] parse_action: Type action response={repr(response)}")
             text = response.split("text=", 1)[1][1:-2]
+            print(f"[DEBUG] parse_action: extracted text={repr(text)}")
             action = {"_metadata": "do", "action": "Type", "text": text}
             return action
         elif response.startswith("do"):
             # Use AST parsing instead of eval for safety
             try:
-                # Escape special characters (newlines, tabs, etc.) for valid Python syntax
-                response = response.replace('\n', '\\n')
-                response = response.replace('\r', '\\r')
+                # Handle newlines in the response - replace actual newlines with spaces
+                # so the do() call stays on a single line for ast.parse
+                response = response.replace('\r\n', ' ').replace('\r', ' ')
+                response = response.replace('\n', ' ')
+
+                # Then escape remaining special characters for ast.parse
                 response = response.replace('\t', '\\t')
 
                 tree = ast.parse(response, mode="eval")

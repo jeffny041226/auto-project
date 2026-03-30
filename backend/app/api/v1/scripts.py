@@ -18,10 +18,10 @@ async def create_script(script_data: ScriptCreate, db: AsyncSession = Depends(ge
 
 
 @router.get("/", response_model=ScriptListResponse)
-async def list_scripts(skip: int = 0, limit: int = 20, db: AsyncSession = Depends(get_db)):
+async def list_scripts(skip: int = 0, limit: int = 20, db: AsyncSession = Depends(get_db), current_user: int = 1):
     """List all scripts."""
     service = ScriptService(db)
-    scripts, total = await service.list_scripts(skip, limit)
+    scripts, total = await service.list_scripts(user_id=current_user, skip=skip, limit=limit)
     return {"items": scripts, "total": total}
 
 

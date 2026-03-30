@@ -207,7 +207,7 @@ def home(device_id: str | None = None, delay: float | None = None) -> None:
 
 def launch_app(
     app_name: str, device_id: str | None = None, delay: float | None = None
-) -> bool:
+) -> str | None:
     """
     Launch an app by name.
 
@@ -217,13 +217,13 @@ def launch_app(
         delay: Delay in seconds after launching. If None, uses configured default.
 
     Returns:
-        True if app was launched, False if app not found.
+        Package name if app was launched, None if app not found.
     """
     if delay is None:
         delay = TIMING_CONFIG.device.default_launch_delay
 
     if app_name not in APP_PACKAGES:
-        return False
+        return None
 
     adb_prefix = _get_adb_prefix(device_id)
     package = APP_PACKAGES[app_name]
@@ -242,7 +242,7 @@ def launch_app(
         capture_output=True,
     )
     time.sleep(delay)
-    return True
+    return package
 
 
 def _get_adb_prefix(device_id: str | None) -> list:

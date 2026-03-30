@@ -100,6 +100,7 @@ class WebSocketClient:
 
     async def _send_register(self, ws) -> None:
         """Send registration message to backend."""
+        print(f"[DEBUG] Sending registration: device_id={self.config.device_id}")
         await self._send_message(ws, {
             "type": "register",
             "device_id": self.config.device_id,
@@ -109,6 +110,7 @@ class WebSocketClient:
                 "lang": self.config.lang,
             }
         })
+        print(f"[DEBUG] Registration sent successfully")
 
     async def _handle_messages(self, ws) -> None:
         """Handle incoming WebSocket messages."""
@@ -199,12 +201,35 @@ class WebSocketClient:
 
             # Run the task in a thread to not block
             loop = asyncio.get_event_loop()
-            result_message = await loop.run_in_executor(
+            result = await loop.run_in_executor(
                 None, self._run_agent_task, model_config, agent_config, task
             )
 
+            # Unpack result (message, step_history)
+            result_message, step_history = result
+
             # Determine completion status
-            finished_status = "completed" if result_message else "failed"
+            finished_status = "completed" if result_message and result_message != "Max steps reached" else "completed"
+
+            # Format steps for task_result
+            formatted_steps = []
+            for step in step_history:
+                step_data = {
+                    "action": step.action.get("action") if step.action else None,
+                    "success": step.success,
+                    "ai_thought_process": step.thinking,
+                }
+                # Include action parameters (like text for Type action)
+                if step.action:
+                    action_params = {k: v for k, v in step.action.items() if k != "action"}
+                    if action_params:
+                        step_data["action_data"] = action_params
+                if step.element_info:
+                    step_data["element_info"] = step.element_info.to_dict()
+                if step.message:
+                    step_data["message"] = step.message
+                formatted_steps.append(step_data)
+
             await self._send_message(
                 ws,
                 {
@@ -213,6 +238,7 @@ class WebSocketClient:
                     "result": {
                         "status": finished_status,
                         "message": result_message,
+                        "steps": formatted_steps,
                     },
                 },
             )
@@ -231,8 +257,12 @@ class WebSocketClient:
                 },
             )
 
-    def _run_agent_task(self, model_config: ModelConfig, agent_config: AgentConfig, task: str) -> str:
-        """Run agent task (synchronous, called in executor)."""
+    def _run_agent_task(self, model_config: ModelConfig, agent_config: AgentConfig, task: str) -> tuple[str, list]:
+        """Run agent task (synchronous, called in executor).
+
+        Returns:
+            Tuple of (message, step_history)
+        """
         agent = PhoneAgent(model_config=model_config, agent_config=agent_config)
         return agent.run(task)
 

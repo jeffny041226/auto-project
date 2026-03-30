@@ -17,8 +17,10 @@ def type_text(text: str, device_id: str | None = None) -> None:
         Requires ADB Keyboard to be installed on the device.
         See: https://github.com/nicnocquee/AdbKeyboard
     """
+    print(f"[DEBUG] type_text: text={repr(text)}, length={len(text)}")
     adb_prefix = _get_adb_prefix(device_id)
     encoded_text = base64.b64encode(text.encode("utf-8")).decode("utf-8")
+    print(f"[DEBUG] type_text: encoded={encoded_text}")
 
     subprocess.run(
         adb_prefix
@@ -44,6 +46,7 @@ def clear_text(device_id: str | None = None) -> None:
     Args:
         device_id: Optional ADB device ID for multi-device setups.
     """
+    print(f"[DEBUG] clear_text called")
     adb_prefix = _get_adb_prefix(device_id)
 
     subprocess.run(

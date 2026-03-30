@@ -133,8 +133,8 @@ class DeviceAgentManager:
         async with self._lock:
             stale_devices = []
             for device_id, conn in self._connections.items():
-                if conn.is_pong_timed_out(timeout=60):
-                    logger.warning(f"Device {device_id} heartbeat timeout (no pong for >60s)")
+                if conn.is_pong_timed_out(timeout=300):
+                    logger.warning(f"Device {device_id} heartbeat timeout (no pong for >300s)")
                     stale_devices.append(device_id)
 
             for device_id in stale_devices:
@@ -203,7 +203,10 @@ class DeviceAgentManager:
                 conn = self._connections[device_id]
                 conn.is_connected = False
                 await conn.stop_heartbeat()
-                await conn.ws.close()
+                try:
+                    await conn.ws.close()
+                except Exception as e:
+                    logger.warning(f"Error closing websocket for {device_id}: {e}")
                 del self._connections[device_id]
 
                 # Update device status
@@ -329,6 +332,7 @@ async def handle_task_result(message: dict):
     result = message.get("result", {})
     result_status = result.get("status", "failed")
     result_message = result.get("message", "")
+    steps = result.get("steps", [])
 
     logger.info(f"Received result for task {task_id}: {result_status}")
 
@@ -341,6 +345,180 @@ async def handle_task_result(message: dict):
         task_status.completed_at = datetime.utcnow()
         if result_status == "failed":
             task_status.error = result_message
+
+    # Update task status in database
+    async with get_db_context() as db:
+        from sqlalchemy import select
+        from app.models.task import Task
+
+        task_result = await db.execute(select(Task).where(Task.task_id == task_id))
+        task = task_result.scalar_one_or_none()
+
+        if not task:
+            # Task was created via agent API (in-memory only) and doesn't exist in database
+            # This is expected for WebSocket agent tasks - log warning and skip DB update
+            logger.warning(
+                f"Task {task_id} not found in database. "
+                f"Task was likely created via agent API and not persisted. "
+                f"Skipping database update."
+            )
+            return
+
+        task.status = result_status
+        task.error_message = result_message if result_status == "failed" else None
+        if result_status == "completed":
+            task.completed_steps = task.total_steps if task.total_steps else 100
+
+            # Generate and save Maestro script for completed tasks
+            try:
+                from app.core.script.manager import ScriptManager
+                from app.core.script.refiner import ScriptRefiner
+                from app.core.script.maestro_generator import MaestroGenerator
+                from app.core.intention.parser import InstructionParser
+
+                # Parse instruction to get app info
+                parser = InstructionParser()
+                parsed = parser.parse(task.instruction)
+                app_name = parsed.app_name or "unknown"
+                # Generate app_id from app_name mapping
+                app_id = _get_app_id_from_name(app_name)
+
+                # Try to get actual package name from launch step's element_info
+                if steps:
+                    for step in steps:
+                        action = step.get("action", "")
+                        if action and action.lower() == "launch":
+                            element_info = step.get("element_info")
+                            logger.info(f"[DEBUG] Found launch step, element_info: {element_info}")
+                            if element_info and element_info.get("resource_id"):
+                                # Use the actual package name from the agent
+                                actual_package = element_info.get("resource_id")
+                                logger.info(f"[DEBUG] Launch step resource_id: {actual_package}")
+                                if actual_package and not actual_package.startswith("input:"):
+                                    app_id = actual_package
+                                    logger.info(f"Using actual package name from launch step: {app_id}")
+                                    break
+
+                # Refine steps using LLM (if we have steps from agent)
+                refined_steps = steps
+                if steps:
+                    try:
+                        refiner = ScriptRefiner()
+                        refined_steps = await refiner.refine(steps)
+                        logger.info(f"Refined {len(steps)} steps to {len(refined_steps)} essential steps")
+                    except Exception as refine_err:
+                        logger.warning(f"Step refinement failed, using prefiltered steps: {refine_err}")
+                        # Fallback: use prefiltered steps
+                        refined_steps = _prefilter_steps(steps)
+
+                # Generate Maestro YAML from refined steps
+                generator = MaestroGenerator()
+                maestro_yaml = generator.generate(
+                    steps=refined_steps,
+                    app_id=app_id,
+                    flow_name=f"Task: {task.instruction[:50]}",
+                )
+
+                # Save script
+                script_manager = ScriptManager(db)
+                script = await script_manager.save_generated(
+                    user_id=task.user_id,
+                    intent="app_open" if "打开" in task.instruction else "agent_generated",
+                    structured_instruction={
+                        "type": "device_agent",
+                        "instruction": task.instruction,
+                        "original_steps": len(steps) if steps else 0,
+                        "refined_steps": len(refined_steps),
+                    },
+                    pseudo_code=f"Agent executed: {task.instruction}",
+                    maestro_yaml=maestro_yaml,
+                )
+                task.script_id = script.script_id
+                logger.info(f"Generated script {script.script_id} for task {task_id}")
+            except Exception as script_err:
+                logger.error(f"Failed to generate script for task {task_id}: {script_err}")
+
+        await db.flush()
+        logger.info(f"Task {task_id} status updated in database: {result_status}")
+
+
+def _prefilter_steps(steps: list[dict]) -> list[dict]:
+    """Pre-filter steps to remove obviously non-essential ones.
+
+    Fast pre-filter before sending to LLM (used as fallback).
+
+    Args:
+        steps: Original steps
+
+    Returns:
+        Steps after pre-filtering
+    """
+    essential = []
+
+    for step in steps:
+        # Skip failed steps
+        if not step.get("success", True):
+            continue
+
+        action = step.get("action", "")
+        action_lower = action.lower() if action else ""
+
+        # Skip back operations
+        if action_lower == "back":
+            continue
+
+        # Skip home button
+        if action_lower == "home":
+            continue
+
+        # Skip wait operations
+        if action_lower == "wait":
+            continue
+
+        # Skip note/call_api/interact actions
+        if action_lower in ("note", "call_api", "interact"):
+            continue
+
+        # Skip steps without element_info (except launchApp)
+        if action_lower != "launch" and not step.get("element_info"):
+            continue
+
+        essential.append(step)
+
+    return essential
+
+
+# App name to app ID mapping
+APP_ID_MAP = {
+    "wechat": "com.tencent.mm",
+    "alipay": "com.eg.android.AlipayGphone",
+    "taobao": "com.taobao.taobao",
+    "jd": "com.jingdong.app.mall",
+    "douyin": "com.ss.android.ugc.aweme",
+    "instagram": "com.instagram.android",
+    "whatsapp": "com.whatsapp",
+    "telegram": "org.telegram.messenger",
+    "twitter": "com.twitter.android",
+    "facebook": "com.facebook.katana",
+    "sina": "com.sina.weibo",
+    "shanhai": "com.mgshuzhi.shanhai",
+    "山海": "com.mgshuzhi.shanhai",
+    "settings": "com.android.settings",
+}
+
+
+def _get_app_id_from_name(app_name: str) -> str:
+    """Get app ID from app name.
+
+    Args:
+        app_name: App name (e.g., 'wechat', 'shanhai', 'settings')
+
+    Returns:
+        App ID string (e.g., 'com.tencent.mm') or generated ID if not found
+    """
+    if app_name in APP_ID_MAP:
+        return APP_ID_MAP[app_name]
+    return f"com.example.{app_name}"
 
 
 async def handle_status_update(message: dict):

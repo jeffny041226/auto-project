@@ -13,9 +13,10 @@ import ast
 import re
 import subprocess
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Optional, Tuple
 
+from phone_agent.actions.element import ElementInfo
 from phone_agent.config.timing import TIMING_CONFIG
 from phone_agent.device_factory import get_device_factory
 
@@ -76,6 +77,8 @@ class ActionResult:
     requires_confirmation: bool = False
     # For Maestro script generation
     element_locator: Optional[ElementLocator] = None
+    # Complete element information
+    element_info: Optional[ElementInfo] = None
 
 
 class MultiStrategyActionHandler:
@@ -98,6 +101,8 @@ class MultiStrategyActionHandler:
         self.device_id = device_id
         self.confirmation_callback = confirmation_callback or self._default_confirmation
         self.takeover_callback = takeover_callback or self._default_takeover
+        # Track last tapped element info for use in subsequent type actions
+        self._last_tapped_element_info: Optional[ElementInfo] = None
 
     def execute(
         self, action: dict[str, Any], screen_width: int, screen_height: int
@@ -193,24 +198,31 @@ class MultiStrategyActionHandler:
         Returns:
             ActionResult
         """
+        result: ActionResult
         if locator.strategy == "id":
             # ID-based tap
-            return self._tap_by_id(locator.value, require_confirmation)
+            result = self._tap_by_id(locator.value, require_confirmation)
         elif locator.strategy == "text":
             # Text-based tap
-            return self._tap_by_text(locator.value, require_confirmation)
+            result = self._tap_by_text(locator.value, require_confirmation)
         elif locator.strategy == "image":
             # Image-based tap (would require template matching)
-            return self._tap_by_image_fallback(locator.value, screen_width, screen_height)
+            result = self._tap_by_image_fallback(locator.value, screen_width, screen_height)
         elif locator.strategy == "point":
             # Direct coordinate tap
-            return self._tap_by_point(locator.value, require_confirmation)
+            result = self._tap_by_point(locator.value, require_confirmation)
         else:
             return ActionResult(
                 success=False,
                 should_finish=False,
                 message=f"Unknown locator strategy: {locator.strategy}",
             )
+
+        # Track last tapped element for type actions
+        if result.success and result.element_info:
+            self._last_tapped_element_info = result.element_info
+
+        return result
 
     def _tap_by_id(self, resource_id: str, require_confirmation: bool = False) -> ActionResult:
         """Tap by resource ID using UI automator.
@@ -220,7 +232,7 @@ class MultiStrategyActionHandler:
             require_confirmation: Whether to show confirmation dialog
 
         Returns:
-            ActionResult
+            ActionResult with element_info
         """
         if require_confirmation and not self.confirmation_callback(f"Tap on {resource_id}"):
             return ActionResult(
@@ -231,15 +243,16 @@ class MultiStrategyActionHandler:
 
         try:
             device_factory = get_device_factory()
-            # Use uiautomator to find element bounds and tap
-            # Format: uiautomator dump + grep for resource-id
-            x, y = self._find_element_center_by_id(resource_id)
-            if x is not None and y is not None:
+            # Find element with full info
+            element_info = self._find_element_info_by_id(resource_id)
+            if element_info and element_info.center_coords:
+                x, y = element_info.center_coords
                 device_factory.tap(x, y, self.device_id)
                 return ActionResult(
                     success=True,
                     should_finish=False,
                     element_locator=ElementLocator(strategy="id", value=resource_id),
+                    element_info=element_info,
                 )
             else:
                 return ActionResult(
@@ -258,7 +271,7 @@ class MultiStrategyActionHandler:
             require_confirmation: Whether to show confirmation dialog
 
         Returns:
-            ActionResult
+            ActionResult with element_info
         """
         if require_confirmation and not self.confirmation_callback(f"Tap on text '{text}'"):
             return ActionResult(
@@ -269,13 +282,15 @@ class MultiStrategyActionHandler:
 
         try:
             device_factory = get_device_factory()
-            x, y = self._find_element_center_by_text(text)
-            if x is not None and y is not None:
+            element_info = self._find_element_info_by_text(text)
+            if element_info and element_info.center_coords:
+                x, y = element_info.center_coords
                 device_factory.tap(x, y, self.device_id)
                 return ActionResult(
                     success=True,
                     should_finish=False,
                     element_locator=ElementLocator(strategy="text", value=text),
+                    element_info=element_info,
                 )
             else:
                 return ActionResult(
@@ -323,7 +338,7 @@ class MultiStrategyActionHandler:
             require_confirmation: Whether to show confirmation dialog
 
         Returns:
-            ActionResult
+            ActionResult with element_info
         """
         try:
             parts = coords.split(",")
@@ -338,57 +353,186 @@ class MultiStrategyActionHandler:
 
             device_factory = get_device_factory()
             device_factory.tap(x, y, self.device_id)
+
+            # Find the actual UI element at this point for better element_info
+            element_info = self._find_element_at_point(x, y)
+            if not element_info:
+                element_info = ElementInfo(
+                    bounds=[x - 10, y - 10, x + 10, y + 10],  # Approximate bounds
+                    center_coords=[x, y],
+                )
+
             return ActionResult(
                 success=True,
                 should_finish=False,
                 element_locator=ElementLocator(strategy="point", value=coords),
+                element_info=element_info,
             )
         except Exception as e:
             return ActionResult(success=False, should_finish=False, message=str(e))
 
-    def _find_element_center_by_id(self, resource_id: str) -> Tuple[Optional[int], Optional[int]]:
-        """Find element center using UI automator by resource ID.
+    def _find_element_at_point(self, x: int, y: int) -> Optional[ElementInfo]:
+        """Find UI element at a specific point coordinate.
+
+        Args:
+            x: X coordinate
+            y: Y coordinate
+
+        Returns:
+            ElementInfo of the element at the point, or None if not found
+        """
+        try:
+            device_factory = get_device_factory()
+
+            output = device_factory._run_command(
+                f'uiautomator dump /sdcard/ui.xml && cat /sdcard/ui.xml',
+                self.device_id,
+                capture_output=True,
+            )
+
+            import re
+            # Find all node elements with bounds
+            # Pattern: <node ... bounds="[x1,y1][x2,y2]" ... />
+            node_pattern = r'<node[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"[^>]*>'
+            matches = list(re.finditer(node_pattern, output))
+
+            for match in matches:
+                x1, y1, x2, y2 = int(match.group(1)), int(match.group(2)), int(match.group(3)), int(match.group(4))
+                # Check if point (x, y) is within bounds
+                if x1 <= x <= x2 and y1 <= y <= y2:
+                    # Found element at this point - get full node context
+                    element_start = match.start()
+                    while element_start > 0 and output[element_start] != '<':
+                        element_start -= 1
+                    element_end = match.end()
+                    while element_end < len(output) and output[element_end] != '>':
+                        element_end += 1
+                    element_end += 1
+                    element_context = output[element_start:element_end]
+
+                    # Extract attributes
+                    id_match = re.search(r'resource-id="([^"]*)"', element_context)
+                    resource_id = id_match.group(1) if id_match else None
+
+                    text_match = re.search(r'text="([^"]*)"', element_context)
+                    text = text_match.group(1) if text_match else None
+
+                    desc_match = re.search(r'content-desc="([^"]*)"', element_context)
+                    content_desc = desc_match.group(1) if desc_match else None
+
+                    clickable_match = re.search(r'clickable="([^"]*)"', element_context)
+                    clickable = clickable_match.group(1).lower() == "true" if clickable_match else False
+
+                    enabled_match = re.search(r'enabled="([^"]*)"', element_context)
+                    enabled = enabled_match.group(1).lower() != "false" if enabled_match else True
+
+                    bounds = [x1, y1, x2, y2]
+                    center_coords = [(x1 + x2) // 2, (y1 + y2) // 2]
+
+                    return ElementInfo(
+                        text=text,
+                        resource_id=resource_id,
+                        bounds=bounds,
+                        center_coords=center_coords,
+                        content_desc=content_desc,
+                        clickable=clickable,
+                        enabled=enabled,
+                    )
+
+            return None
+        except Exception as e:
+            return None
+
+    def _find_element_info_by_id(self, resource_id: str) -> Optional[ElementInfo]:
+        """Find element info using UI automator by resource ID.
 
         Args:
             resource_id: Resource ID
 
         Returns:
-            Tuple of (x, y) center coordinates or (None, None) if not found
+            ElementInfo with full details or None if not found
         """
         try:
             device_factory = get_device_factory()
 
-            # Try using uiautomator to dump and parse
-            # This is a simplified version - production would use proper UI automator
             output = device_factory._run_command(
                 f'uiautomator dump /sdcard/ui.xml && cat /sdcard/ui.xml',
                 self.device_id,
                 capture_output=True,
             )
 
-            # Parse bounds from XML for the given resource-id
-            # Simplified parsing - would need more robust XML parsing
             import re
-            pattern = rf'resource-id="{re.escape(resource_id)}"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"'
+            # Match element with resource-id
+            pattern = rf'resource-id="{re.escape(resource_id)}"'
             match = re.search(pattern, output)
-            if match:
-                x1, y1, x2, y2 = int(match.group(1)), int(match.group(2)), int(match.group(3)), int(match.group(4))
-                center_x = (x1 + x2) // 2
-                center_y = (y1 + y2) // 2
-                return center_x, center_y
+            if not match:
+                return None
 
-            return None, None
+            # Find the full node element by finding <node before and > after
+            # Go back to find '<'
+            element_start = match.start()
+            while element_start > 0 and output[element_start] != '<':
+                element_start -= 1
+
+            # Go forward to find '>' (end of element)
+            element_end = match.end()
+            while element_end < len(output) and output[element_end] != '>':
+                element_end += 1
+            element_end += 1  # Include the '>'
+
+            # Get the full element context
+            element_context = output[element_start:element_end]
+
+            # Extract bounds
+            bounds_pattern = r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"'
+            bounds_match = re.search(bounds_pattern, element_context)
+            bounds = None
+            center_coords = None
+            if bounds_match:
+                x1, y1, x2, y2 = int(bounds_match.group(1)), int(bounds_match.group(2)), int(bounds_match.group(3)), int(bounds_match.group(4))
+                bounds = [x1, y1, x2, y2]
+                center_coords = [(x1 + x2) // 2, (y1 + y2) // 2]
+
+            # Extract text
+            text_pattern = r'text="([^"]*)"'
+            text_match = re.search(text_pattern, element_context)
+            text = text_match.group(1) if text_match else None
+
+            # Extract content-desc
+            desc_pattern = r'content-desc="([^"]*)"'
+            desc_match = re.search(desc_pattern, element_context)
+            content_desc = desc_match.group(1) if desc_match else None
+
+            # Extract clickable
+            clickable_pattern = r'clickable="([^"]*)"'
+            clickable_match = re.search(clickable_pattern, element_context)
+            clickable = clickable_match.group(1).lower() == "true" if clickable_match else False
+
+            # Extract enabled
+            enabled_pattern = r'enabled="([^"]*)"'
+            enabled_match = re.search(enabled_pattern, element_context)
+            enabled = enabled_match.group(1).lower() != "false" if enabled_match else True
+
+            return ElementInfo(
+                text=text,
+                resource_id=resource_id,
+                bounds=bounds,
+                center_coords=center_coords,
+                content_desc=content_desc,
+                clickable=clickable,
+                enabled=enabled,
+            )
         except Exception as e:
-            return None, None
+            return None
 
-    def _find_element_center_by_text(self, text: str) -> Tuple[Optional[int], Optional[int]]:
-        """Find element center using UI automator by text.
+    def _find_element_info_by_text(self, text: str) -> Optional[ElementInfo]:
+        """Find element info using UI automator by text.
 
         Args:
             text: Text to match
 
         Returns:
-            Tuple of (x, y) center coordinates or (None, None) if not found
+            ElementInfo with full details or None if not found
         """
         try:
             device_factory = get_device_factory()
@@ -399,20 +543,160 @@ class MultiStrategyActionHandler:
                 capture_output=True,
             )
 
-            # Parse bounds from XML for the given text
             import re
-            # Match text attribute
-            pattern = rf'text="([^"]*{re.escape(text)}[^"]*)"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"'
+            # Find element containing this text
+            # Match text="..." with bounds
+            pattern = rf'text="([^"]*{re.escape(text)}[^"]*)"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\)"'
             match = re.search(pattern, output)
-            if match:
-                x1, y1, x2, y2 = int(match.group(2)), int(match.group(3)), int(match.group(4)), int(match.group(5))
-                center_x = (x1 + x2) // 2
-                center_y = (y1 + y2) // 2
-                return center_x, center_y
+            if not match:
+                # Try reverse order (bounds before text)
+                pattern2 = rf'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"[^>]*text="([^"]*{re.escape(text)}[^"]*)"'
+                match = re.search(pattern2, output)
 
-            return None, None
+            if not match:
+                return None
+
+            # Extract groups based on which pattern matched
+            if len(match.groups()) == 5:
+                matched_text = match.group(1)
+                x1, y1, x2, y2 = int(match.group(2)), int(match.group(3)), int(match.group(4)), int(match.group(5))
+            else:
+                return None
+
+            bounds = [x1, y1, x2, y2]
+            center_coords = [(x1 + x2) // 2, (y1 + y2) // 2]
+
+            # Get more context to extract other attributes
+            # Find the full node element by finding < before and > after
+            # Go back to find '<'
+            element_start = match.start()
+            while element_start > 0 and output[element_start] != '<':
+                element_start -= 1
+
+            # Go forward to find '>' (end of element)
+            element_end = match.end()
+            while element_end < len(output) and output[element_end] != '>':
+                element_end += 1
+            element_end += 1  # Include the '>'
+
+            # Get the full element context
+            element_context = output[element_start:element_end]
+
+            # Extract resource-id
+            id_pattern = r'resource-id="([^"]*)"'
+            id_match = re.search(id_pattern, element_context)
+            resource_id = id_match.group(1) if id_match else None
+
+            # Extract content-desc
+            desc_pattern = r'content-desc="([^"]*)"'
+            desc_match = re.search(desc_pattern, element_context)
+            content_desc = desc_match.group(1) if desc_match else None
+
+            # Extract clickable
+            clickable_pattern = r'clickable="([^"]*)"'
+            clickable_match = re.search(clickable_pattern, element_context)
+            clickable = clickable_match.group(1).lower() == "true" if clickable_match else False
+
+            # Extract enabled
+            enabled_pattern = r'enabled="([^"]*)"'
+            enabled_match = re.search(enabled_pattern, element_context)
+            enabled = enabled_match.group(1).lower() != "false" if enabled_match else True
+
+            return ElementInfo(
+                text=matched_text,
+                resource_id=resource_id,
+                bounds=bounds,
+                center_coords=center_coords,
+                content_desc=content_desc,
+                clickable=clickable,
+                enabled=enabled,
+            )
         except Exception as e:
-            return None, None
+            return None
+
+    def _find_focused_element_info(self) -> Optional[ElementInfo]:
+        """Find the currently focused input element.
+
+        Returns:
+            ElementInfo for the focused input field or None if not found
+        """
+        try:
+            device_factory = get_device_factory()
+
+            output = device_factory._run_command(
+                f'uiautomator dump /sdcard/ui.xml && cat /sdcard/ui.xml',
+                self.device_id,
+                capture_output=True,
+            )
+
+            import re
+
+            # Find focused element - typically EditText with focused="true"
+            # Pattern: focused="true" ... class="android.widget.EditText" ... bounds="[...]"
+            # Or: class="android.widget.EditText" ... focused="true" ... bounds="[...]"
+            focused_pattern = r'focused="true"[^>]*class="android\.widget\.EditText"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"'
+            match = re.search(focused_pattern, output)
+
+            if not match:
+                # Try alternative pattern order
+                focused_pattern2 = r'class="android\.widget\.EditText"[^>]*focused="true"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"'
+                match = re.search(focused_pattern2, output)
+
+            if not match:
+                # Fallback: find ANY EditText with bounds (even without focused="true")
+                # This handles cases where the focus attribute is not set
+                edittext_pattern = r'class="android\.widget\.EditText"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"'
+                match = re.search(edittext_pattern, output)
+
+            if match:
+                x1, y1, x2, y2 = int(match.group(1)), int(match.group(2)), int(match.group(3)), int(match.group(4))
+                bounds = [x1, y1, x2, y2]
+                center_coords = [(x1 + x2) // 2, (y1 + y2) // 2]
+
+                # Try to extract resource-id and text from the same element
+                # Find the full node element by finding < before and > after
+                # Go back to find '<'
+                element_start = match.start()
+                while element_start > 0 and output[element_start] != '<':
+                    element_start -= 1
+
+                # Go forward to find '>' (end of element)
+                element_end = match.end()
+                while element_end < len(output) and output[element_end] != '>':
+                    element_end += 1
+                element_end += 1  # Include the '>'
+
+                # Get the full element context
+                element_context = output[element_start:element_end]
+
+                # Extract resource-id
+                id_pattern = r'resource-id="([^"]*)"'
+                id_match = re.search(id_pattern, element_context)
+                resource_id = id_match.group(1) if id_match else None
+
+                # Extract text
+                text_pattern = r'text="([^"]*)"'
+                text_match = re.search(text_pattern, element_context)
+                text = text_match.group(1) if text_match else None
+
+                # Extract content-desc
+                desc_pattern = r'content-desc="([^"]*)"'
+                desc_match = re.search(desc_pattern, element_context)
+                content_desc = desc_match.group(1) if desc_match else None
+
+                return ElementInfo(
+                    text=text,
+                    resource_id=resource_id,
+                    bounds=bounds,
+                    center_coords=center_coords,
+                    content_desc=content_desc,
+                    clickable=True,
+                    enabled=True,
+                )
+
+            return None
+        except Exception as e:
+            return None
 
     def _handle_launch(self, action: dict, width: int, height: int) -> ActionResult:
         """Handle app launch action."""
@@ -421,9 +705,16 @@ class MultiStrategyActionHandler:
             return ActionResult(False, False, "No app name specified")
 
         device_factory = get_device_factory()
-        success = device_factory.launch_app(app_name, self.device_id)
-        if success:
-            return ActionResult(True, False)
+        package_name = device_factory.launch_app(app_name, self.device_id)
+        if package_name:
+            # Create element_info for launch action with the actual package name
+            element_info = ElementInfo(
+                text=app_name,
+                resource_id=package_name,  # Store actual package name in resource_id
+                bounds=None,
+                center_coords=None,
+            )
+            return ActionResult(True, False, element_info=element_info)
         return ActionResult(False, False, f"App not found: {app_name}")
 
     def _handle_tap(self, action: dict, width: int, height: int) -> ActionResult:
@@ -454,10 +745,20 @@ class MultiStrategyActionHandler:
 
             device_factory = get_device_factory()
             device_factory.tap(abs_x, abs_y, self.device_id)
+
+            # Create element_info for relative coordinate tap
+            element_info = ElementInfo(
+                bounds=[abs_x - 10, abs_y - 10, abs_x + 10, abs_y + 10],
+                center_coords=[abs_x, abs_y],
+            )
+            # Track last tapped element for type actions
+            self._last_tapped_element_info = element_info
+
             return ActionResult(
                 success=True,
                 should_finish=False,
                 element_locator=ElementLocator(strategy="point", value=f"{abs_x},{abs_y}"),
+                element_info=element_info,
             )
 
         return ActionResult(False, False, f"Cannot parse element: {element}")
@@ -467,6 +768,14 @@ class MultiStrategyActionHandler:
         text = action.get("text", "")
 
         device_factory = get_device_factory()
+
+        # Find the focused input element before typing
+        # First try to find currently focused element
+        element_info = self._find_focused_element_info()
+
+        # Fallback to last tapped element if no focused element found
+        if not element_info and self._last_tapped_element_info:
+            element_info = self._last_tapped_element_info
 
         # Switch to ADB keyboard
         original_ime = device_factory.detect_and_set_adb_keyboard(self.device_id)
@@ -484,7 +793,25 @@ class MultiStrategyActionHandler:
         device_factory.restore_keyboard(original_ime, self.device_id)
         time.sleep(TIMING_CONFIG.action.keyboard_restore_delay)
 
-        return ActionResult(True, False)
+        # Create element_info with input text info
+        if element_info:
+            # Enhance with the typed text
+            input_element_info = ElementInfo(
+                text=element_info.text or text,  # Use input hint text or typed text
+                resource_id=element_info.resource_id,
+                bounds=element_info.bounds,
+                center_coords=element_info.center_coords,
+                content_desc=element_info.content_desc,
+                clickable=element_info.clickable,
+                enabled=element_info.enabled,
+            )
+        else:
+            # Fallback - no focused element found
+            input_element_info = ElementInfo(
+                text=f"input:{text}",  # Mark as text input
+            )
+
+        return ActionResult(True, False, element_info=input_element_info)
 
     def _handle_swipe(self, action: dict, width: int, height: int) -> ActionResult:
         """Handle swipe action."""
